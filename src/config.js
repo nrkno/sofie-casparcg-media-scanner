@@ -23,6 +23,10 @@ const defaults = {
     width: 256,
     height: -1
   },
+  metadata: {
+    enhanced: true,
+    interlaced: true
+  },
   isProduction: process.env.NODE_ENV === 'production',
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'trace',

@@ -150,7 +150,6 @@ module.exports = function ({ config, db, logger }) {
         resolve(json)
       })
     })
-
     doc.cinf = await info.then(json => {
       let tb = (json.streams[0].time_base || '1/25').split('/')
       let dur = parseFloat(json.format.duration) || (1 / 24)
@@ -175,52 +174,97 @@ module.exports = function ({ config, db, logger }) {
       ].join(' ') + '\r\n'
     })
 
-    doc.mediainfo = await info.then(json => ({
-      name: doc._id,
-      streams: json.streams.map(s => ({
-        codec: {
-          long_name: s.codec_long_name,
-          type: s.codec_type,
-          time_base: s.codec_time_base,
-          tag_string: s.codec_tag_string,
-          is_avc: s.is_avc
-        },
+    if (!config.metadata.enhanced) {
+      return
+    }
 
-        // Video
-        width: s.width,
-        height: s.height,
-        sample_aspect_ratio: s.sample_aspect_ratio,
-        display_aspect_ratio: s.display_aspect_ratio,
-        pix_fmt: s.pix_fmt,
-        bits_per_raw_sample: s.bits_per_raw_sample,
-
-        // Audio
-        sample_fmt: s.sample_fmt,
-        sample_rate: s.sample_rate,
-        channels: s.channels,
-        channel_layout: s.channel_layout,
-        bits_per_sample: s.bits_per_sample,
-
-        // Common
-        time_base: s.time_base,
-        start_time: s.start_time,
-        duration_ts: s.duration_ts,
-        duration: s.duration,
-
-        bit_rate: s.bit_rate,
-        max_bit_rate: s.max_bit_rate,
-        nb_frames: s.nb_frames
-      })),
-      format: {
-        name: json.format.format_name,
-        long_name: json.format.format_long_name,
-        size: json.format.time,
-
-        start_time: json.format.start_time,
-        duration: json.format.duration,
-        bit_rate: json.format.bit_rate,
-        max_bit_rate: json.format.max_bit_rate
+    const getInterlaceInfo = new Promise((resolve, reject) => {
+      if (!config.metadata.interlaced) {
+        return
       }
-    }))
+
+      const args = [
+        // TODO (perf) Low priority process?
+        config.paths.ffmpeg,
+        '-hide_banner',
+        '-filter:v', 'idet',
+        '-frames:v', '200', // TODO make configurable. needs sufficient motion (not titlecard)
+        '-an',
+        '-f', 'rawvideo', '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
+        '-i', `"${doc.mediaPath}"`
+      ]
+      cp.exec(args.join(' '), (err, stdout, stderr) => {
+        if (err) {
+          return reject(err)
+        }
+
+        var regex2 = /Multi frame detection: TFF:\s+(\d+)\s+BFF:\s+(\d+)\s+Progressive:\s+(\d+)/
+        const res = regex2.exec(stderr)
+        if (res === null) {
+          resolve('unknown')
+          return
+        }
+
+        const tff = parseInt(res[1])
+        const bff = parseInt(res[2])
+        const fieldOrder = tff <= 10 && bff <= 10 ? 'progressive' : (tff > bff ? 'tff' : 'bff')
+
+        resolve(fieldOrder)
+      })
+    })
+
+    doc.mediainfo = await info.then(json => {
+      return getInterlaceInfo.then(fieldOrder => {
+        return {
+          name: doc._id,
+          field_order: fieldOrder,
+
+          streams: json.streams.map(s => ({
+            codec: {
+              long_name: s.codec_long_name,
+              type: s.codec_type,
+              time_base: s.codec_time_base,
+              tag_string: s.codec_tag_string,
+              is_avc: s.is_avc
+            },
+
+            // Video
+            width: s.width,
+            height: s.height,
+            sample_aspect_ratio: s.sample_aspect_ratio,
+            display_aspect_ratio: s.display_aspect_ratio,
+            pix_fmt: s.pix_fmt,
+            bits_per_raw_sample: s.bits_per_raw_sample,
+
+            // Audio
+            sample_fmt: s.sample_fmt,
+            sample_rate: s.sample_rate,
+            channels: s.channels,
+            channel_layout: s.channel_layout,
+            bits_per_sample: s.bits_per_sample,
+
+            // Common
+            time_base: s.time_base,
+            start_time: s.start_time,
+            duration_ts: s.duration_ts,
+            duration: s.duration,
+
+            bit_rate: s.bit_rate,
+            max_bit_rate: s.max_bit_rate,
+            nb_frames: s.nb_frames
+          })),
+          format: {
+            name: json.format.format_name,
+            long_name: json.format.format_long_name,
+            size: json.format.time,
+
+            start_time: json.format.start_time,
+            duration: json.format.duration,
+            bit_rate: json.format.bit_rate,
+            max_bit_rate: json.format.max_bit_rate
+          }
+        }
+      })
+    })
   }
 }
