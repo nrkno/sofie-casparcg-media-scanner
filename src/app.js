@@ -31,10 +31,10 @@ module.exports = function ({ db, config, logger }) {
   }))
 
   app.get('/media/thumbnail/:id', wrap(async (req, res) => {
-    const { _attachments } = await db.get(req.params.id.toUpperCase(), { attachments: true })
+    const { _attachments } = await db.get(req.params.id.toUpperCase(), { attachments: true, binary: true })
 
     res.set('content-type', 'image/png')
-    res.send(Buffer.from(_attachments['thumb.png'].data, 'base64'))
+    res.send(_attachments['thumb.png'].data)
   }))
 
   app.get('/cls', wrap(async (req, res) => {
