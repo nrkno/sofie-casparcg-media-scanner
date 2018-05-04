@@ -80,12 +80,55 @@ module.exports = function ({ config, db, logger }) {
       }),
       generateThumb(doc).catch(err => {
         mediaLogger.error({ err }, 'Thumbnail Failed')
+      }),
+      generatePreview(doc).catch(err => {
+        mediaLogger.error({ err }, 'Preview Failed')
       })
     ])
 
     await db.put(doc)
 
     mediaLogger.info('Scanned')
+  }
+  
+  async function generatePreview(doc) {
+    if (!config.previews.enable) {
+      return
+    }
+
+    const tmpPath = path.join(os.tmpdir(), Math.random().toString(16)) + '.webm'
+
+    const args = [
+      // TODO (perf) Low priority process?
+      config.paths.ffmpeg,
+      '-hide_banner',
+      '-i', `"${doc.mediaPath}"`,
+      '-f', 'webm',
+      '-an',
+      '-c:v', 'libvpx',
+      '-crf', config.previews.quality,
+      '-auto-alt-ref', '0',
+      `-vf scale=${config.previews.width}:${config.previews.height}`,
+      '-threads 1',
+      tmpPath
+    ]
+
+    await mkdirp(path.dirname(tmpPath))
+    await new Promise((resolve, reject) => {
+      cp.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+    })
+
+    const previewStat = await statAsync(tmpPath)
+    doc.previewSize = previewStat.size
+    doc.previewTime = previewStat.mtime.toISOString()
+
+    doc._attachments = {
+      'preview.webm': {
+        content_type: 'video/webm',
+        data: (await readFileAsync(tmpPath))
+      }
+    }
+    await unlinkAsync(tmpPath)
   }
 
   async function generateThumb (doc) {

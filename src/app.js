@@ -37,6 +37,13 @@ module.exports = function ({ db, config, logger }) {
     res.send(_attachments['thumb.png'].data)
   }))
 
+  app.get('/media/preview/:id', wrap(async (req, res) => {
+    const { _attachments } = await db.get(req.params.id.toUpperCase(), { attachments: true, binary: true })
+
+    res.set('content-type', 'video/webm')
+    res.send(_attachments['preview.webm'].data)
+  }))
+
   app.get('/cls', wrap(async (req, res) => {
     const { rows } = await db.allDocs({ include_docs: true })
 
