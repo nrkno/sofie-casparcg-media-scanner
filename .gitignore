@@ -2,3 +2,5 @@ node_modules/
 bin/
 media/
 dist/
+_media/
+casparcg.config
