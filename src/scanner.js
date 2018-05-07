@@ -179,8 +179,8 @@ module.exports = function ({ config, db, logger }) {
     }
 
     const getInterlaceInfo = new Promise((resolve, reject) => {
-      if (!config.metadata.interlaced) {
-        return
+      if (!config.metadata.fieldOrder) {
+        return resolve('unknown')
       }
 
       const args = [
@@ -201,8 +201,7 @@ module.exports = function ({ config, db, logger }) {
         var regex2 = /Multi frame detection: TFF:\s+(\d+)\s+BFF:\s+(\d+)\s+Progressive:\s+(\d+)/
         const res = regex2.exec(stderr)
         if (res === null) {
-          resolve('unknown')
-          return
+          return resolve('unknown')
         }
 
         const tff = parseInt(res[1])

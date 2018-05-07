@@ -24,8 +24,8 @@ const defaults = {
     height: -1
   },
   metadata: {
-    enhanced: true,
-    interlaced: true
+    enhanced: false,
+    fieldOrder: false
   },
   isProduction: process.env.NODE_ENV === 'production',
   logger: {
