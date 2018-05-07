@@ -24,8 +24,8 @@ const defaults = {
     height: -1
   },
   metadata: {
-    enhanced: false,
-    fieldOrder: false
+    enhanced: false, // Note: After changing this setting, you will want to delete the _media database folder
+    fieldOrder: false // This is an expensive check, as it requires decoding the beginning of the video
   },
   isProduction: process.env.NODE_ENV === 'production',
   logger: {

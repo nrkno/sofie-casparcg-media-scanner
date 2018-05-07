@@ -27,7 +27,7 @@ module.exports = function ({ db, config, logger }) {
   app.get('/media/info/:id', wrap(async (req, res) => {
     const { mediainfo } = await db.get(req.params.id.toUpperCase())
     res.set('content-type', 'application/json')
-    res.send(mediainfo)
+    res.send(mediainfo || {})
   }))
 
   app.get('/media/thumbnail/:id', wrap(async (req, res) => {
