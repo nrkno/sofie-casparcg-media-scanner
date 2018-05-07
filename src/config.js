@@ -24,14 +24,14 @@ const defaults = {
     height: -1
   },
   metadata: {
-    enhanced: false, // Note: After changing this setting, you will want to delete the _media database folder
+    enhanced: true, // Note: After changing this setting, you will want to delete the _media database folder
     fieldOrder: false // This is an expensive check, as it requires decoding the beginning of the video
   },
   previews: {
     enable: true,
     width: 160,
     height: -1,
-    quality: 5
+    quality: 4
   },
   isProduction: process.env.NODE_ENV === 'production',
   logger: {

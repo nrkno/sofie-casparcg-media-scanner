@@ -33,12 +33,20 @@ module.exports = function ({ db, config, logger }) {
   app.get('/media/thumbnail/:id', wrap(async (req, res) => {
     const { _attachments } = await db.get(req.params.id.toUpperCase(), { attachments: true, binary: true })
 
+    if (!_attachments['thumb.png']) {
+      return res.status(404).end()
+    }
+
     res.set('content-type', 'image/png')
     res.send(_attachments['thumb.png'].data)
   }))
 
   app.get('/media/preview/:id', wrap(async (req, res) => {
     const { _attachments } = await db.get(req.params.id.toUpperCase(), { attachments: true, binary: true })
+
+    if (!_attachments['preview.webm']) {
+      return res.status(404).end()
+    }
 
     res.set('content-type', 'video/webm')
     res.send(_attachments['preview.webm'].data)
