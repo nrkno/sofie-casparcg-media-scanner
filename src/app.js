@@ -8,7 +8,7 @@ const { generateInfo, generateThumb, scanFile, lookForFile } = require('./scanne
 const { generatePreview } = require('./previews')
 const recursiveReadDir = require('recursive-readdir')
 const { getId, fsSize } = require('./util')
-const { setManualMode, getManualMode } = require('./manual')
+const { setManualMode, getManualMode, restoreManualMode } = require('./manual')
 
 const recursiveReadDirAsync = util.promisify(recursiveReadDir)
 
@@ -16,6 +16,8 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 module.exports = function ({ db, config, logger }) {
   const app = express()
+
+  restoreManualMode()
 
   app.use(pinoHttp({ logger }))
   app.use(cors())

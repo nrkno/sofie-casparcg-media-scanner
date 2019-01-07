@@ -7,3 +7,4 @@ _previews/
 _media/
 casparcg.config
 *.exe
+.manualMode
