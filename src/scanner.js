@@ -364,8 +364,17 @@ module.exports = function ({ config, db, logger }) {
       })
     })
 
+    let type = 'AUDIO'
+    if (json.streams[0].pix_fmt) {
+      type = (parseFloat(json.format.duration) || 0) <= (1 / 24) ? 'STILL' : 'MOVIE'
+    }
+
     return {
       name: doc._id,
+      path: doc.mediaPath,
+      size: doc.mediaSize,
+      time: doc.mediaTime,
+      type,
       field_order: fieldOrder,
       scenes: metadata.scenes,
       freezes: metadata.freezes,
