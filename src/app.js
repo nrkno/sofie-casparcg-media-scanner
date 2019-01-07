@@ -4,8 +4,11 @@ const cors = require('cors')
 const PouchDB = require('pouchdb-node')
 const util = require('util')
 const path = require('path')
+const { generateInfo, generateThumb, scanFile, lookForFile } = require('./scanner')
+const { generatePreview } = require('./previews')
 const recursiveReadDir = require('recursive-readdir')
 const { getId, fsSize } = require('./util')
+const { setManualMode, getManualMode } = require('./manual')
 
 const recursiveReadDirAsync = util.promisify(recursiveReadDir)
 
@@ -112,14 +115,43 @@ module.exports = function ({ db, config, logger }) {
   }))
 
   app.get('/thumbnail/generate', wrap(async (req, res) => {
-    // TODO (fix) Force scanner to scan and wait?
     res.set('content-type', 'text/plain')
+
+    db.allDocs({
+      include_docs: true
+    }, (result) => {
+      const files = result.rows.map(i => i.doc)
+      
+      // set up a procedure to iterate through the results and generate thumbnails in sequence
+      function stepThrough (array, index) {
+        if (index === undefined) {
+          index = 0
+        }
+        if (index >= array.length) { 
+          return
+        }
+        const item = array[index];
+        generateThumb(config, item).then(async () => {
+          await db.put(item)
+          stepThrough(array, index + 1)
+        }).catch(() => {
+          stepThrough(array, index + 1)
+        })
+      }
+
+      stepThrough(files)
+    })
+
     res.send(`202 THUMBNAIL GENERATE_ALL OK\r\n`)
   }))
 
   app.get('/thumbnail/generate/:id', wrap(async (req, res) => {
-    // TODO (fix) Force scanner to scan and wait?
     res.set('content-type', 'text/plain')
+
+    const doc = await db.get(req.params.id.toUpperCase())
+    await generateThumb(config, doc)
+    db.put(doc)
+
     res.send(`202 THUMBNAIL GENERATE OK\r\n`)
   }))
 
@@ -132,6 +164,59 @@ module.exports = function ({ db, config, logger }) {
 
     res.set('content-type', 'text/plain')
     res.send(`200 THUMBNAIL LIST OK\r\n${str}\r\n`)
+  }))
+
+  app.get('/preview/generate/:id', wrap(async (req, res) => {
+    const doc = await db.get(req.params.id.toUpperCase())
+    const mediaId = doc._id
+    await generatePreview(db, config, logger, mediaId)
+
+    res.set('content-type', 'text/plain')
+    res.send(`202 PREVIEW GENERATE OK\r\n`)
+  }))
+
+  app.get('/media/scan/:fileName', wrap(async (req, res) => {
+    let doc
+    try {
+      const mediaId = req.params.fileName
+        .replace(/\.[^/.]+$/, '')
+        .replace(/\\+/g, '/')
+        .toUpperCase()
+      doc = await db.get(mediaId)
+
+      await generateInfo(config, doc)
+    } catch (e) {
+      logger.info(`Looking for file "${req.params.fileName}"...`)
+      const stat = await lookForFile(req.params.fileName, config)
+
+      if (stat === false) {
+        res.send(`404 FILE NOT FOUND\r\n`)
+        return
+      }
+      
+      await scanFile(db, config, logger, stat.mediaPath, stat.mediaId, stat.mediaStat)
+    }
+    
+    res.set('content-type', 'text/plain')
+    res.send(`202 MEDIA INFO GENERATE OK\r\n`)
+  }))
+
+  app.get('/manualMode', wrap(async (req, res) => {
+    res.set('content-type', 'application/json')
+    res.send(JSON.stringify({
+      manualMode: getManualMode()
+    }))
+  }))
+
+  app.get('/manualMode/:enabled', wrap(async (req, res) => {
+    setManualMode(req.params.enabled.toLowerCase() === 'true')
+    
+    logger.info(`Media Scanner is now in manual mode`)
+
+    res.set('content-type', 'application/json')
+    res.send(JSON.stringify({
+      manualMode: getManualMode()
+    }))
   }))
 
   app.get('/thumbnail/:id', wrap(async (req, res) => {
