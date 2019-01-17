@@ -137,14 +137,14 @@ async function generateInfo(config, doc) {
     })
   })
 
-  doc.cinf = generateCinf(doc, json)
+  doc.cinf = generateCinf(config, doc, json)
 
   if (config.metadata !== null) {
-    doc.mediainfo = await generateMediainfo(doc, json)
+    doc.mediainfo = await generateMediainfo(config, doc, json)
   }
 }
 
-function generateCinf(doc, json) {
+function generateCinf(config, doc, json) {
   let tb = (json.streams[0].time_base || '1/25').split('/')
   let dur = parseFloat(json.format.duration) || (1 / 24)
 
@@ -168,7 +168,7 @@ function generateCinf(doc, json) {
   ].join(' ') + '\r\n'
 }
 
-async function generateMediainfo(doc, json) {
+async function generateMediainfo(config, doc, json) {
   const fieldOrder = await new Promise((resolve, reject) => {
     if (!config.metadata.fieldOrder) {
       return resolve('unknown')
