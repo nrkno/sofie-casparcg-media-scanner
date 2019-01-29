@@ -34,7 +34,8 @@ const defaults = {
     blackDetection: false,
     blackDuration: '2.0',
     blackRatio: .98,
-    blackThreshold: .1
+    blackThreshold: .1,
+    mergeBlacksAndFreezes: true
   },
   previews: {
     enable: false,

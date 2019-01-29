@@ -275,9 +275,9 @@ module.exports = function ({ config, db, logger }) {
       }
 
       if (config.metadata.blackDetection) {
-        filterString += `blackdetect=d=${config.metadata.blackDuration}:
-          pic_th=${config.metadata.blackRatio}:
-          pix_th=${config.metadata.thresHold}`
+        filterString += `blackdetect=d=${config.metadata.blackDuration}:` + 
+          `pic_th=${config.metadata.blackRatio}:` +
+          `pix_th=${config.metadata.blackThreshold}`
           
         if (config.metadata.freezeDetection) {
           filterString += ','
@@ -285,8 +285,8 @@ module.exports = function ({ config, db, logger }) {
       }
 
       if (config.metadata.freezeDetection) {
-        filterString += `freezedetect=n=${config.metadata.freezeNoise}:
-          d=${config.metadata.freezeDuration}`
+        filterString += `freezedetect=n=${config.metadata.freezeNoise}:` +
+          `d=${config.metadata.freezeDuration}`
       }
 
       const args = [
@@ -325,8 +325,8 @@ module.exports = function ({ config, db, logger }) {
             if (res) {
                 blacks.push({
                     start: res[2],
-                    duration: res[5],
-                    end: res[8]
+                    duration: res[8],
+                    end: res[5]
                 })
             }
         } while (res)
@@ -360,9 +360,97 @@ module.exports = function ({ config, db, logger }) {
             }
         } while (res)
 
+        // if freeze frame is the end of video, it is not detected fully
+        if (!freezes[freezes.length - 1].end) {
+          freezes[freezes.length - 1].end = json.format.duration
+          freezes[freezes.length - 1].duration = json.format.duration - freezes[freezes.length - 1].start
+        }
+
         return resolve({ scenes, freezes, blacks })
       })
     })
+
+    if (config.metadata.mergeBlacksAndFreezes) {
+      if (metadata.blacks.length && metadata.freezes.length) {
+        // blacks are subsets of freezes, so we can remove the freeze frame warnings during a black
+        // in order to do this we create a linear timeline:
+        const tl = []
+        for (const black of metadata.blacks) {
+          tl.push({ time: black.start, type: 'start', isBlack: true })
+          tl.push({ time: black.end, type: 'end', isBlack: true })
+        }
+        for (const freeze of metadata.freezes) {
+          tl.push({ time: freeze.start, type: 'start', isBlack: false })
+          tl.push({ time: freeze.end, type: 'end', isBlack: false })
+        }
+        // then we sort it for time, if black & freeze start at the same time make sure black is inside the freeze
+        tl.sort((a, b) => {
+          if (a.time > b.time) {
+            return 1
+          } else if (a.time === b.time) {
+            if ((a.isBlack && b.isBlack) || !(a.isBlack || b.isBlack)) {
+              return 0
+            } else {
+              if (a.isBlack && a.type === 'start') {
+                return 1
+              } else if (a.isBlack && a.type === 'end') {
+                return -1
+              } else {
+                return 0
+              }
+            }
+          } else {
+            return -1
+          }
+        })
+
+        // now we add freezes that aren't coinciding with blacks
+        let freeze, interruptedFreeze = false
+        freezes = []
+        const startFreeze = t => freeze = { start: t }
+        const endFreeze = t => {
+          if (t === freeze.start) {
+            freeze = undefined
+            return
+          }
+          freeze.end = t
+          freeze.duration = t - freeze.start
+          freezes.push(freeze)
+          freeze = undefined
+        }
+
+        for (const ev of tl) {
+          if (ev.type === 'start') {
+            if (ev.isBlack) {
+              if (freeze) {
+                interruptedFreeze = true
+                endFreeze(ev.time)
+              }
+            } else {
+              startFreeze(ev.time)
+            }
+          } else {
+            if (ev.isBlack) {
+              if (interruptedFreeze) {
+                startFreeze(ev.time)
+                interruptedFreeze = false
+              }
+            } else {
+              if (freeze) {
+                endFreeze(ev.time)
+              } else {
+                const freeze = freezes[freezes.length - 1]
+                freeze.end = ev.time
+                freeze.duration = ev.time - freeze.start
+                interruptedFreeze = false
+              }
+            }
+          }
+        }
+
+        metadata.freezes = freezes
+      }
+    }
 
     let type = 'AUDIO'
     if (json.streams[0].pix_fmt) {
