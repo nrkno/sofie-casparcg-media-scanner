@@ -361,7 +361,7 @@ module.exports = function ({ config, db, logger }) {
         } while (res)
 
         // if freeze frame is the end of video, it is not detected fully
-        if (!freezes[freezes.length - 1].end) {
+        if (freezes[freezes.length - 1] && !freezes[freezes.length - 1].end) {
           freezes[freezes.length - 1].end = json.format.duration
           freezes[freezes.length - 1].duration = json.format.duration - freezes[freezes.length - 1].start
         }
@@ -440,9 +440,11 @@ module.exports = function ({ config, db, logger }) {
                 endFreeze(ev.time)
               } else {
                 const freeze = freezes[freezes.length - 1]
-                freeze.end = ev.time
-                freeze.duration = ev.time - freeze.start
-                interruptedFreeze = false
+                if (freeze) {
+                  freeze.end = ev.time
+                  freeze.duration = ev.time - freeze.start
+                  interruptedFreeze = false
+                }
               }
             }
           }
@@ -457,7 +459,20 @@ module.exports = function ({ config, db, logger }) {
       type = (parseFloat(json.format.duration) || 0) <= (1 / 24) ? 'STILL' : 'MOVIE'
     }
 
-    return {
+    const tryToCast = val => isNaN(Number(val)) ? val : Number(val)
+    const tryToCastDoc = doc => {
+      for (let key in doc) {
+        let type = typeof doc[key]
+        if (type === 'object' || type === 'array') {
+          doc[key] = tryToCastDoc(doc[key])
+        } else {
+          doc[key] = tryToCast(doc[key])
+        }
+      }
+      return doc
+    }
+
+    return tryToCastDoc({
       name: doc._id,
       path: doc.mediaPath,
       size: doc.mediaSize,
@@ -512,6 +527,6 @@ module.exports = function ({ config, db, logger }) {
         bit_rate: json.format.bit_rate,
         max_bit_rate: json.format.max_bit_rate
       }
-    }
+    })
   }
 }
