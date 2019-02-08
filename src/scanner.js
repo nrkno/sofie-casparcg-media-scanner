@@ -266,20 +266,12 @@ module.exports = function ({ config, db, logger }) {
       }
 
       let filterString = '' // String with combined filters.
-      if (config.metadata.scenes) {
-        filterString += `"select='gt(scene,${config.metadata.sceneThreshold})',showinfo"`
-
-        if (config.metadata.blackDetection || config.metadata.freezeDetection) {
-          filterString += ','
-        }
-      }
-
       if (config.metadata.blackDetection) {
         filterString += `blackdetect=d=${config.metadata.blackDuration}:` + 
           `pic_th=${config.metadata.blackRatio}:` +
           `pix_th=${config.metadata.blackThreshold}`
           
-        if (config.metadata.freezeDetection) {
+        if (config.metadata.freezeDetection || config.metadata.scenes) {
           filterString += ','
         }
       }
@@ -287,6 +279,14 @@ module.exports = function ({ config, db, logger }) {
       if (config.metadata.freezeDetection) {
         filterString += `freezedetect=n=${config.metadata.freezeNoise}:` +
           `d=${config.metadata.freezeDuration}`
+          
+          if (config.metadata.scenes) {
+            filterString += ','
+          }
+      }
+
+      if (config.metadata.scenes) {
+        filterString += `"select='gt(scene,${config.metadata.sceneThreshold})',showinfo"`
       }
 
       const args = [
@@ -344,7 +344,7 @@ module.exports = function ({ config, db, logger }) {
         let i = 0
         do {
             res = regex.exec(stderr)
-            if (res) {
+            if (res && freezes[i]) {
                 freezes[i].duration = res[2]
                 i++
             }
@@ -354,7 +354,7 @@ module.exports = function ({ config, db, logger }) {
         i = 0
         do {
             res = regex.exec(stderr)
-            if (res) {
+            if (res && freezes[i]) {
                 freezes[i].end = res[2]
                 i++
             }
@@ -413,6 +413,7 @@ module.exports = function ({ config, db, logger }) {
             freeze = undefined
             return
           }
+          if (!freeze) return
           freeze.end = t
           freeze.duration = t - freeze.start
           freezes.push(freeze)
