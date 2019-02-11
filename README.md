@@ -31,6 +31,7 @@ These endpoints are exposed by the AMCP protocol in CasparCG Server. This means 
 * `/thumbnail` - Lists the available thumbnails
 * `/thumbnail/<name>` - Gets the thumbnail for a media file
 * `/stat/fs` - Gets statistics about disk size, format and usage
+* `/stat/seq` - Gets the sequence number from PouchDB, it starts at 0 and gets incremented every time a document is added or modified.
 
 ### Changes
 A stream of changes can be accessed with the following. [Full docs](https://pouchdb.com/api.html#changes)
@@ -51,7 +52,7 @@ db.changes({
 ```
 
 ### Enhanced Metadata
-These endpoints provide additional metadata on media in a json format.
+These endpoints provide additional metadata on media in a json format. Depending on your configuration this will include field order, cut / scene detection and black frame detection.
 
 * `/media` - Lists available media files in json form with an enhanced set of metadata
 * `/media/info/<name>` - Gets the json enhanced metadata for the specified media file
