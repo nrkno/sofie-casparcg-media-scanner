@@ -1,8 +1,8 @@
 const pino = require('pino')
 const config = require('./config')
 const PouchDB = require('pouchdb-node')
-const scanner = require('./scanner')
-const previews = require('./previews')
+const { scanner } = require('./scanner')
+const { previews } = require('./previews')
 const app = require('./app')
 const startWatchDog = require('./watchdog')
 

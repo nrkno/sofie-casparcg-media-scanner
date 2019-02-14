@@ -26,12 +26,15 @@ These endpoints are exposed by the AMCP protocol in CasparCG Server. This means 
 * `/cls` - Lists available media files
 * `/fls` - Lists available font files
 * `/cinf/<name>` - Gets information on specified media file
-* `/thumbnail/generate` - Backwards compatibility, has no effect
-* `/thumbnail/generate/<name>` - Backwards compatibility, has no effect
+* `/media/scan/<name>` - Scans the specific file, can be used in tandem with manual mode
+* `/thumbnail/generate` - Generates thumbnails for all media
+* `/thumbnail/generate/<name>` - Generates a thumbnail for the specific file
 * `/thumbnail` - Lists the available thumbnails
 * `/thumbnail/<name>` - Gets the thumbnail for a media file
+* `/preview/generate/<name>` - Generates a webm preview for the specific file
 * `/stat/fs` - Gets statistics about disk size, format and usage
 * `/stat/seq` - Gets the sequence number from PouchDB, it starts at 0 and gets incremented every time a document is added or modified.
+* `/manualMode/<enabled>` - Sets the mode of the scanner, in manual mode API requests have to be mode in order to scan media.
 
 ### Changes
 A stream of changes can be accessed with the following. [Full docs](https://pouchdb.com/api.html#changes)
