@@ -217,6 +217,8 @@ module.exports = function ({ db, config, logger }) {
       doc = await db.get(mediaId)
 
       await generateInfo(config, doc)
+      logger.info(`Generated info for "${mediaId}"`)
+      await db.put(doc)
     } catch (e) {
       logger.info(`Looking for file "${req.params.fileName}"...`)
       const stat = await lookForFile(req.params.fileName, config)
