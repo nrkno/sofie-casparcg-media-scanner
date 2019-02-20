@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs')
 const util = require('util')
 let manualMode = false
@@ -16,7 +17,7 @@ module.exports = {
 		if (manualMode) {
 			asyncWriteFile('.manualMode', '', {}).then(() => { }).catch((e) => console.log(`Could not persist manual mode: ${mode}`))
 		} else {
-			asyncUnlink('.manualMode', '', {}).then(() => { }).catch((e) => console.log(`Could not persist manual mode: ${mode}`))
+			asyncUnlink('.manualMode').then(() => { }).catch((e) => console.log(`Could not persist manual mode: ${mode}`))
 		}
 	},
 	restoreManualMode () {

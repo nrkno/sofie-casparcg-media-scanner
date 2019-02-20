@@ -1,8 +1,10 @@
+// @ts-check
 /**
  * The purpose of this file is to make occasional checks if media-scanner behaves as it should.
  * If it doesn't, kill the process and let the parent process restart it.
  */
-const PouchDB = require('pouchdb-node')
+// const PouchDB = require('pouchdb-node')
+const { isScanningFile } = require('./scanner')
 const fs = require('fs')
 const config = require('./config')
 
@@ -14,9 +16,7 @@ const EXPECT_TIME = 30 * 1000
 const WATCHDOG_FILE = 'watchdog.mov'
 
 async function cleanUpOldWatchdogFiles (logger, path) {
-
     try {
-
         const files = await promisify(fs.readdir, path)
         for (let i in files) {
             let fileName = files[i]
@@ -33,6 +33,7 @@ async function cleanUpOldWatchdogFiles (logger, path) {
         }
     } catch (err) {
         logger.error(err)
+        logger.error(err.stack)
     }
 }
 
@@ -69,26 +70,25 @@ async function doWhatWatchDogsDo (logger, db, path, fileName) {
     await cleanUpOldWatchdogFiles(logger, path)
 
     // Watch the pouchdb for changes:
-    db.changes({
+    let changesListener = db.changes({
         since: 'now',
         include_docs: true,
         live: true,
         attachments: false
-    }).on('change', (changes) => {
-        if (changes.deleted) {
-            if (changes.id === createdFileId) {
+    }).on('change', (change) => {
+        if (change.deleted) {
+            if (change.id === createdFileId) {
                 hasRemovedFile()
             }
-        } else if (changes.doc) {
-            let mediaPath = changes.doc.mediaPath
+        } else if (change.doc) {
+            let mediaPath = change.doc.mediaPath
 
             if (mediaPath.match(new RegExp(copyFileName, 'i')) ) {
-                hasCreatedFile(changes.id)
+                hasCreatedFile(change.id)
             }
         }
+        changesListener.cancel()
     })
-
-
     // First, we make a copy of a file, and expect to see the file in the database later:
 
     logger.info('Watchdog: Copy file ' + copyFileName)
@@ -168,16 +168,20 @@ function promisify (fcn) {
     })
 }
 
-module.exports = function startWatchDog(logger, db) {
+let watchdogInterval
+module.exports.startWatchDog = function(logger, db) {
     const basePath = config.scanner.paths
     const path = `${basePath}/${WATCHDOG_FILE}`
-
-    // We're using a filed calle "watchdog.mov" to do the watchdog routine
+    
+    // We're using a file called "watchdog.mov" to do the watchdog routine
     fs.exists(path, (exists) => {
 
         if (exists) {
             // Start the watchdog:
             const triggerWatchDog = () => {
+                if(isScanningFile()){
+                    return
+                }
                 doWhatWatchDogsDo(logger, db, basePath, WATCHDOG_FILE)
                 .then(() => {
                     logger.info('Watchdog ok')
@@ -185,6 +189,7 @@ module.exports = function startWatchDog(logger, db) {
                 .catch(err => {
                     if (err.toString().match(/Timeout:/)) {
                         logger.error(err)
+                        logger.error(err.stack)
                         logger.info(`Watchdog failed, shutting down!`)
                         setTimeout(() => {
                             process.exit(1)
@@ -192,12 +197,20 @@ module.exports = function startWatchDog(logger, db) {
                     } else {
                         logger.error('Error in watchdog:')
                         logger.error(err)
+                        logger.error(err.stack)
                     }
                 })
             }
-            setInterval(triggerWatchDog, CHECK_INTERVAL)
+            watchdogInterval = setInterval(triggerWatchDog, CHECK_INTERVAL)
         } else {
             logger.warn(`Watchdog is disabled because ${path} wasn't found`)
         }
     })
+}
+
+module.exports.stopWatchDog = function() {
+    if(watchdogInterval){
+        clearInterval(watchdogInterval)
+        watchdogInterval = undefined
+    }
 }

@@ -1,3 +1,4 @@
+// @ts-check
 const cp = require('child_process')
 const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
@@ -12,14 +13,18 @@ const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const renameAsync = util.promisify(fs.rename)
 
-async function generatePreview (db, config, logger, mediaId, deleted) {
+async function deletePreview (logger, mediaId) {
+  const destPath = path.join('_previews', mediaId) + '.webm'
+  await unlinkAsync(destPath).catch(err => {
+    if(err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1){
+      logger.error(err)
+    }
+  })
+  return
+}
+async function generatePreview (db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
-    if (deleted) {
-      await unlinkAsync(destPath)
-      return
-    }
-
     const doc = await db.get(mediaId)
     if (doc.previewTime === doc.mediaTime && await fileExists(destPath)) {
       return
@@ -69,6 +74,7 @@ async function generatePreview (db, config, logger, mediaId, deleted) {
     mediaLogger.info('Finished preview generation')
   } catch (err) {
     logger.error({ err })
+    logger.error(err.stack)
   }
 }
 
@@ -82,8 +88,11 @@ module.exports = {
           live: true
         }).on('change', function (change) {
           o.next([change.id, change.deleted])
+        }).on('complete', function (info) {
+          logger.info('db connection completed')
         }).on('error', function (err) {
           logger.error({ err })
+          logger.error(err.stack)
         })
 
         // Queue all for attempting to regenerate previews, if they are needed
@@ -93,7 +102,11 @@ module.exports = {
       })
       .concatMap(async ([id, deleted]) => {
         if (!getManualMode()) {
-          await generatePreview(db, config, logger, id, deleted)
+          if(deleted){
+            await deletePreview(logger, id)
+          } else {
+            await generatePreview(db, config, logger, id)
+          }
         }
       })
       .subscribe()

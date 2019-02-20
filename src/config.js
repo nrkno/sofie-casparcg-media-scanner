@@ -1,3 +1,4 @@
+// @ts-check
 const nconf = require('nconf')
 const pkg = require('../package.json')
 const fs = require('fs')

@@ -1,3 +1,4 @@
+// @ts-check
 const cp = require('child_process')
 const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
@@ -14,7 +15,9 @@ const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const readFileAsync = util.promisify(fs.readFile)
 
-async function lookForFile (mediaGeneralId, config) {
+let isCurrentlyScanning = false
+
+async function lookForFile(mediaGeneralId, config) {
   try {
     const mediaPath = path.join(config.paths.media, mediaGeneralId)
     const mediaStat = await statAsync(mediaPath)
@@ -29,49 +32,64 @@ async function lookForFile (mediaGeneralId, config) {
   }
 }
 
-async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
-  if (!mediaId || mediaStat.isDirectory()) {
-    return
+function isScanningFile() {
+  return isCurrentlyScanning
+}
+
+async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
+  try {
+    if(isCurrentlyScanning) {
+      return // Not quite sure about this, but lets try
+    }
+    if (!mediaId || mediaStat.isDirectory()) {
+      return
+    }
+    isCurrentlyScanning = true
+
+    const doc = await db
+      .get(mediaId)
+      .catch(() => ({ _id: mediaId }))
+
+    const mediaLogger = logger.child({
+      id: mediaId,
+      path: mediaPath,
+      size: mediaStat.size,
+      mtime: mediaStat.mtime.toISOString()
+    })
+
+    if (doc.mediaPath && doc.mediaPath !== mediaPath) {
+      mediaLogger.info('Skipped')
+      isCurrentlyScanning = false
+      return
+    }
+
+    if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
+      isCurrentlyScanning = false
+      return
+    }
+
+    doc.mediaPath = mediaPath
+    doc.mediaSize = mediaStat.size
+    doc.mediaTime = mediaStat.mtime.getTime()
+
+    if (!getManualMode()) {
+      await Promise.all([
+        generateInfo(config, doc).catch(err => {
+          mediaLogger.error({ err }, 'Info Failed')
+        }),
+        generateThumb(config, doc).catch(err => {
+          mediaLogger.error({ err }, 'Thumbnail Failed')
+        })
+      ])
+    }
+
+    await db.put(doc)
+    isCurrentlyScanning = false
+    mediaLogger.info('Scanned')
+  } catch (error) {
+    isCurrentlyScanning = false
+    throw error
   }
-
-  const doc = await db
-    .get(mediaId)
-    .catch(() => ({ _id: mediaId }))
-
-  const mediaLogger = logger.child({
-    id: mediaId,
-    path: mediaPath,
-    size: mediaStat.size,
-    mtime: mediaStat.mtime.toISOString()
-  })
-
-  if (doc.mediaPath && doc.mediaPath !== mediaPath) {
-    mediaLogger.info('Skipped')
-    return
-  }
-
-  if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
-    return
-  }
-
-  doc.mediaPath = mediaPath
-  doc.mediaSize = mediaStat.size
-  doc.mediaTime = mediaStat.mtime.getTime()
-
-  if (!getManualMode()) {
-    await Promise.all([
-      generateInfo(config, doc).catch(err => {
-        mediaLogger.error({ err }, 'Info Failed')
-      }),
-      generateThumb(config, doc).catch(err => {
-        mediaLogger.error({ err }, 'Thumbnail Failed')
-      })
-    ])
-  }
-
-  await db.put(doc)
-
-  mediaLogger.info('Scanned')
 }
 
 async function generateThumb(config, doc) {
@@ -210,10 +228,10 @@ async function generateMediainfo(config, doc, json) {
 
     let filterString = '' // String with combined filters.
     if (config.metadata.blackDetection) {
-      filterString += `blackdetect=d=${config.metadata.blackDuration}:` + 
+      filterString += `blackdetect=d=${config.metadata.blackDuration}:` +
         `pic_th=${config.metadata.blackRatio}:` +
         `pix_th=${config.metadata.blackThreshold}`
-        
+
       if (config.metadata.freezeDetection || config.metadata.scenes) {
         filterString += ','
       }
@@ -222,10 +240,10 @@ async function generateMediainfo(config, doc, json) {
     if (config.metadata.freezeDetection) {
       filterString += `freezedetect=n=${config.metadata.freezeNoise}:` +
         `d=${config.metadata.freezeDuration}`
-        
-        if (config.metadata.scenes) {
-          filterString += ','
-        }
+
+      if (config.metadata.scenes) {
+        filterString += ','
+      }
     }
 
     if (config.metadata.scenes) {
@@ -247,9 +265,9 @@ async function generateMediainfo(config, doc, json) {
         return reject(err)
       }
 
-      const scenes = []
-      const blacks = []
-      const freezes = []
+      let scenes = []
+      let blacks = []
+      let freezes = []
 
       // Scenes
       var regex = /Parsed_showinfo_(.*)pts_time:([\d.]+)\s+/g
@@ -260,47 +278,47 @@ async function generateMediainfo(config, doc, json) {
           scenes.push(parseFloat(res[2]))
         }
       } while (res)
-      
+
       // Black detect
       var regex = /(black_start:)(\d+(.\d+)?)( black_end:)(\d+(.\d+)?)( black_duration:)(\d+(.\d+))?/g
       do {
-          res = regex.exec(stderr)
-          if (res) {
-              blacks.push({
-                  start: res[2],
-                  duration: res[8],
-                  end: res[5]
-              })
-          }
+        res = regex.exec(stderr)
+        if (res) {
+          blacks.push({
+            start: res[2],
+            duration: res[8],
+            end: res[5]
+          })
+        }
       } while (res)
 
       // Freeze detect
       regex = /(lavfi\.freezedetect\.freeze_start: )(\d+(.\d+)?)/g
       do {
-          res = regex.exec(stderr)
-          if (res) {
-              freezes.push({ start: res[2] })
-          }
+        res = regex.exec(stderr)
+        if (res) {
+          freezes.push({ start: res[2] })
+        }
       } while (res)
-      
+
       regex = /(lavfi\.freezedetect\.freeze_duration: )(\d+(.\d+)?)/g
       let i = 0
       do {
-          res = regex.exec(stderr)
-          if (res && freezes[i]) {
-              freezes[i].duration = res[2]
-              i++
-          }
+        res = regex.exec(stderr)
+        if (res && freezes[i]) {
+          freezes[i].duration = res[2]
+          i++
+        }
       } while (res)
-      
+
       regex = /(lavfi\.freezedetect\.freeze_end: )(\d+(.\d+)?)/g
       i = 0
       do {
-          res = regex.exec(stderr)
-          if (res && freezes[i]) {
-              freezes[i].end = res[2]
-              i++
-          }
+        res = regex.exec(stderr)
+        if (res && freezes[i]) {
+          freezes[i].end = res[2]
+          i++
+        }
       } while (res)
 
       // if freeze frame is the end of video, it is not detected fully
@@ -312,7 +330,7 @@ async function generateMediainfo(config, doc, json) {
       return resolve({ scenes, freezes, blacks })
     })
   })
-  
+
   if (config.metadata.mergeBlacksAndFreezes) {
     if (
       metadata.blacks &&
@@ -354,7 +372,7 @@ async function generateMediainfo(config, doc, json) {
 
       // now we add freezes that aren't coinciding with blacks
       let freeze, interruptedFreeze = false
-      freezes = []
+      let freezes = []
       const startFreeze = t => freeze = { start: t }
       const endFreeze = t => {
         if (t === freeze.start) {
@@ -402,17 +420,17 @@ async function generateMediainfo(config, doc, json) {
       metadata.freezes = freezes
     }
   }
-  
+
   let type = 'AUDIO'
   if (json.streams[0].pix_fmt) {
     type = (parseFloat(json.format.duration) || 0) <= (1 / 24) ? 'STILL' : 'MOVIE'
   }
-  
+
   const tryToCast = val => isNaN(Number(val)) ? val : Number(val)
   const tryToCastDoc = doc => {
     for (let key in doc) {
       let type = typeof doc[key]
-      if (type === 'object' || type === 'array') {
+      if (type === 'object') {
         doc[key] = tryToCastDoc(doc[key])
       } else {
         doc[key] = tryToCast(doc[key])
@@ -484,6 +502,7 @@ module.exports = {
   generateInfo,
   scanFile,
   lookForFile,
+  isScanningFile,
   scanner: function ({ config, db, logger }) {
     Observable
       .create(o => {
@@ -496,13 +515,13 @@ module.exports = {
             }
           }, config.scanner))
           .on('error', err => logger.error({ err }))
-          .on('add', (path, stat) => o.next([ path, stat ]))
-          .on('change', (path, stat) => o.next([ path, stat ]))
-          .on('unlink', (path, stat) => o.next([ path ]))
+          .on('add', (path, stat) => o.next([path, stat]))
+          .on('change', (path, stat) => o.next([path, stat]))
+          .on('unlink', (path, stat) => o.next([path]))
         return () => watcher.close()
       })
       // TODO (perf) groupBy + mergeMap with concurrency.
-      .concatMap(async ([ mediaPath, mediaStat ]) => {
+      .concatMap(async ([mediaPath, mediaStat]) => {
         const mediaId = getId(config.paths.media, mediaPath)
         try {
           if (!mediaStat) {
@@ -516,7 +535,7 @@ module.exports = {
       })
       .subscribe()
 
-    async function cleanDeleted () {
+    async function cleanDeleted() {
       logger.info('Checking for dead media')
 
       const limit = 256

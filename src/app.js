@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express')
 const pinoHttp = require('pino-http')
 const cors = require('cors')
@@ -146,6 +147,7 @@ module.exports = function ({ db, config, logger }) {
       res.send(`202 THUMBNAIL GENERATE_ALL OK\r\n`)
     } catch (e) {
       logger.error(e)
+      logger.error(e.stack)
 
       res.send(`501 THUMBNAIL GENERATE_ALL ERROR\r\n`)
     }
@@ -163,11 +165,13 @@ module.exports = function ({ db, config, logger }) {
         res.send(`202 THUMBNAIL GENERATE OK\r\n`)
       } catch(e) {
         logger.error(e)
+        logger.error(e.stack)
   
         res.send(`501 THUMBNAIL GENERATE ERROR\r\n`)
       }
     } catch (e) {
       logger.error(e)
+      logger.error(e.stack)
 
       res.send(`501 THUMBNAIL GENERATE ERROR\r\n`)
     }
@@ -197,11 +201,13 @@ module.exports = function ({ db, config, logger }) {
         res.send(`202 PREVIEW GENERATE OK\r\n`)
       } catch (e) {
         logger.error(e)
+        logger.error(e.stack)
   
         res.send(`500 PREVIEW GENERATE ERROR\r\n`)
       }
     } catch (e) {
       logger.error(e)
+      logger.error(e.stack)
 
       res.send(`500 PREVIEW GENERATE ERROR\r\n`)
     }
@@ -229,6 +235,9 @@ module.exports = function ({ db, config, logger }) {
       }
       
       await scanFile(db, config, logger, stat.mediaPath, stat.mediaId, stat.mediaStat)
+      .catch(error => {
+        logger.error({err: error})
+      })
     }
     
     res.set('content-type', 'text/plain')

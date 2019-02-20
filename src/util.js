@@ -1,3 +1,4 @@
+// @ts-check
 const path = require('path')
 const fs = require('fs')
 const util = require('util')
@@ -53,20 +54,20 @@ module.exports = {
                 let lines = stdout.toString().split('\n');
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    line = line.replace(/ +/g, ' ').split(' ');
-                    if (line && (line[0].startsWith('/')) || (line[6] && line[6] === '/')) {
+                    let lineParts = line.replace(/ +/g, ' ').split(' ');
+                    if (lineParts && (lineParts[0].startsWith('/')) || (lineParts[6] && lineParts[6] === '/')) {
                       const res  = {
-                        fs: line[0],
-                        type: line[1],
-                        size: parseInt(line[2]) * 1024,
-                        used: parseInt(line[3]) * 1024,
-                        use: parseFloat(100 * line[3] / line[2]).toFixed(2),
-                        mount: line[line.length - 1]
+                        fs: lineParts[0],
+                        type: lineParts[1],
+                        size: parseInt(lineParts[2]) * 1024,
+                        used: parseInt(lineParts[3]) * 1024,
+                        use: (100 * parseFloat(lineParts[3]) / parseFloat(lineParts[2])).toFixed(2),
+                        mount: lineParts[lineParts.length - 1]
                       }
                       if (process.platform === 'darwin') {
                         res.type =  'HFS'
-                        res.size = parseInt(line[1]) * 1024
-                        res.used = parseInt(line[2]) * 1024
+                        res.size = parseInt(lineParts[1]) * 1024
+                        res.used = parseInt(lineParts[2]) * 1024
                       }
                       res.use = (100 * res.size / res.used).toFixed(2)
                       // data.push({
@@ -92,14 +93,14 @@ module.exports = {
                 let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    line = line.trim().split(/\s\s+/);
+                    let lineParts = line.trim().split(/\s\s+/);
                     data.push({
-                      'fs': line[0],
-                      'type': line[1],
-                      'size': parseInt(line[3]),
-                      'used': parseInt(line[3]) - parseInt(line[2]),
-                      'use': parseFloat((100.0 * (parseInt(line[3]) - parseInt(line[2])) / parseInt(line[3])).toFixed(2)),
-                      'mount': line[0]
+                      'fs': lineParts[0],
+                      'type': lineParts[1],
+                      'size': parseInt(lineParts[3]),
+                      'used': parseInt(lineParts[3]) - parseInt(lineParts[2]),
+                      'use': parseFloat((100.0 * (parseInt(lineParts[3]) - parseInt(lineParts[2])) / parseInt(lineParts[3])).toFixed(2)),
+                      'mount': lineParts[0]
                     })
                   }
                 })
