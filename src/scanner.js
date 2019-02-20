@@ -314,7 +314,12 @@ async function generateMediainfo(config, doc, json) {
   })
   
   if (config.metadata.mergeBlacksAndFreezes) {
-    if (metadata.blacks.length && metadata.freezes.length) {
+    if (
+      metadata.blacks &&
+      metadata.blacks.length &&
+      metadata.freezes &&
+      metadata.freezes.length
+    ) {
       // blacks are subsets of freezes, so we can remove the freeze frame warnings during a black
       // in order to do this we create a linear timeline:
       const tl = []
