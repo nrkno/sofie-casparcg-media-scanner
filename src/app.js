@@ -117,7 +117,7 @@ module.exports = function ({ db, config, logger }) {
     res.send(`201 CINF OK\r\n${cinf}`)
   }))
 
-  function stepThrough(array, index) {
+  function stepThrough (array, index) {
     if (index === undefined) {
       index = 0
     }

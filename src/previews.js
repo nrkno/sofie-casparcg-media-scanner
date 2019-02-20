@@ -1,6 +1,5 @@
 // @ts-check
 const ChildProcess = require('child_process')
-const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
 const mkdirp = require('mkdirp-promise')
 const os = require('os')
@@ -13,10 +12,10 @@ const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const renameAsync = util.promisify(fs.rename)
 
-async function deletePreview (logger, mediaId) {
+async function deletePreview(logger, mediaId) {
   const destPath = path.join('_previews', mediaId) + '.webm'
   await unlinkAsync(destPath).catch(err => {
-    if(err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1){
+    if (err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1) {
       logger.error(err)
     }
   })
@@ -24,13 +23,13 @@ async function deletePreview (logger, mediaId) {
 }
 
 function killAllProcesses() {
-  if(runningFFMPEGGeneratePreviewProcess){
+  if (runningFFMPEGGeneratePreviewProcess) {
     runningFFMPEGGeneratePreviewProcess.kill()
   }
 }
 
 let runningFFMPEGGeneratePreviewProcess = null
-async function generatePreview (db, config, logger, mediaId) {
+async function generatePreview(db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
     const doc = await db.get(mediaId)
@@ -68,7 +67,7 @@ async function generatePreview (db, config, logger, mediaId) {
     mediaLogger.info('Starting preview generation')
     await new Promise((resolve, reject) => {
       runningFFMPEGGeneratePreviewProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
-      runningFFMPEGGeneratePreviewProcess.on('exit', function(){
+      runningFFMPEGGeneratePreviewProcess.on('exit', function () {
         runningFFMPEGGeneratePreviewProcess = null
       })
     })
@@ -88,39 +87,38 @@ async function generatePreview (db, config, logger, mediaId) {
     logger.error(err.stack)
   }
 }
+async function rowChanged(id, deleted, logger, db, config) {
+  if (!getManualMode()) {
+    if (deleted) {
+      await deletePreview(logger, id)
+    } else {
+      await generatePreview(db, config, logger, id)
+    }
+  }
+}
+
+async function previews({ config, db, logger }) {
+  let changesListener = db.changes({
+    since: 'now',
+    live: true
+  }).on('change', change => {
+    return rowChanged(change.id, change.deleted, logger, db, config)
+  }).on('complete', info => {
+    logger.info('db connection completed')
+  }).on('error', err => {
+    logger.error({ err })
+    logger.error(err.stack)
+  })
+
+  // Queue all for attempting to regenerate previews, if they are needed
+  const { rows } = await db.allDocs()
+  rows.forEach(row => rowChanged(row.id, false, logger, db, config))
+  logger.info('Queued all for preview validity check')
+  return changesListener
+}
 
 module.exports = {
   generatePreview,
   killAllProcesses,
-  previews: function ({ config, db, logger }) {
-    Observable
-      .create(async o => {
-        db.changes({
-          since: 'now',
-          live: true
-        }).on('change', function (change) {
-          o.next([change.id, change.deleted])
-        }).on('complete', function (info) {
-          logger.info('db connection completed')
-        }).on('error', function (err) {
-          logger.error({ err })
-          logger.error(err.stack)
-        })
-
-        // Queue all for attempting to regenerate previews, if they are needed
-        const { rows } = await db.allDocs()
-        rows.forEach(d => o.next([d.id, false]))
-        logger.info('Queued all for preview validity check')
-      })
-      .concatMap(async ([id, deleted]) => {
-        if (!getManualMode()) {
-          if(deleted){
-            await deletePreview(logger, id)
-          } else {
-            await generatePreview(db, config, logger, id)
-          }
-        }
-      })
-      .subscribe()
-  }
+  previews
 }

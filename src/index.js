@@ -17,11 +17,14 @@ const db = new PouchDB('_media') // `http://localhost:${config.http.port}/db/_me
 logger.info('STARTING')
 logger.info(config)
 
-scanner({ logger, db, config })
+let scannerListener = scanner({ logger, db, config })
+// scannerListener.cancel() to stop
+
 app({ logger, db, config }).listen(config.http.port)
 
 if (config.previews.enable) {
-  previews({ logger, db, config })
+  let previewListener = previews({ logger, db, config })
+  // previewListener.cancel() to stop
 }
 logger.info('STARTING watchdog')
 WatchDog.startWatchDog(logger, db)

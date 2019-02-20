@@ -1,6 +1,5 @@
 // @ts-check
 const ChildProcess = require('child_process')
-const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
 const chokidar = require('chokidar')
 const mkdirp = require('mkdirp-promise')
@@ -35,14 +34,48 @@ async function lookForFile(mediaGeneralId, config) {
 function isScanningFile() {
   return isCurrentlyScanning
 }
- 
+
+let filesToScan = {}
+
+async function retryScan() {
+  let redoRetry = false
+  for (const fileObject of Object.values(filesToScan)) {
+    // }
+    // Object.values(filesToScan).forEach(fileObject => {
+    await scanFile(
+      fileObject.db,
+      fileObject.config,
+      fileObject.logger,
+      fileObject.mediaPath,
+      fileObject.mediaId,
+      fileObject.mediaStat)
+      .then(() => {
+        delete filesToScan[fileObject.mediaId]
+      })
+      .catch(error => {
+        // Some sort of error. We want to retry this file, right?
+        redoRetry = true
+      })
+  }
+  if (redoRetry) {
+    retryScan()
+  }
+}
+
 async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
   try {
-    if(isCurrentlyScanning) {
-      return // Not quite sure about this, but lets try
-    }
     if (!mediaId || mediaStat.isDirectory()) {
       return
+    }
+    if (filesToScan[mediaId]) {
+      // File already in list to be scanned(probably)
+    } else {
+      filesToScan[mediaId] = {
+        db, config, logger, mediaPath, mediaId, mediaStat
+      }
+    }
+    if (isCurrentlyScanning) {
+      return // Not quite sure about this, but lets try
     }
     isCurrentlyScanning = true
 
@@ -92,6 +125,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
 
     // Alternatively, we need to make some sort of queue to prevent these types of things from happening.
     await db.put(doc)
+    delete filesToScan[mediaId]
     isCurrentlyScanning = false
     mediaLogger.info('Scanned')
   } catch (error) {
@@ -118,7 +152,7 @@ async function generateThumb(config, doc) {
   await mkdirp(path.dirname(tmpPath))
   await new Promise((resolve, reject) => {
     runningThumbnailProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
-    runningThumbnailProcess.on('exit', function(){ 
+    runningThumbnailProcess.on('exit', function () {
       runningThumbnailProcess = null
     })
   })
@@ -154,7 +188,7 @@ async function generateInfo(config, doc) {
       '-print_format', 'json'
     ]
     runningffprobeProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningffprobeProcess.on('exit', function(){ 
+      runningffprobeProcess.on('exit', function () {
         runningffprobeProcess = null
       })
       if (err) {
@@ -164,7 +198,7 @@ async function generateInfo(config, doc) {
       const json = JSON.parse(stdout)
       if (!json.streams || !json.streams[0]) {
         return reject(new Error('not media'))
-      } 
+      }
       // TODO: Remove set-timeout here. Just testing that the thing works as expected
       resolve(json)
     })
@@ -202,17 +236,17 @@ function generateCinf(config, doc, json) {
 }
 
 
-function killAllChildProcesses(){
-  if(runningMediaInfoProcess){
+function killAllChildProcesses() {
+  if (runningMediaInfoProcess) {
     runningMediaInfoProcess.kill()
   }
-  if(runningMediaInfoProcessRawVideo){
+  if (runningMediaInfoProcessRawVideo) {
     runningMediaInfoProcessRawVideo.kill()
   }
-  if(runningThumbnailProcess){
+  if (runningThumbnailProcess) {
     runningThumbnailProcess.kill()
   }
-  if(runningffprobeProcess){
+  if (runningffprobeProcess) {
     runningffprobeProcess.kill()
   }
 }
@@ -236,7 +270,7 @@ async function generateMediainfo(config, doc, json) {
       '-i', `"${doc.mediaPath}"`
     ]
     runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningMediaInfoProcessRawVideo.on('exit', function(){ 
+      runningMediaInfoProcessRawVideo.on('exit', function () {
         runningMediaInfoProcessRawVideo = null
       })
       if (err) {
@@ -297,7 +331,7 @@ async function generateMediainfo(config, doc, json) {
       '-'
     ]
     runningMediaInfoProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningMediaInfoProcess.on('exit', function(){ 
+      runningMediaInfoProcess.on('exit', function () {
         runningMediaInfoProcess = null
       })
       if (err) {
@@ -536,6 +570,89 @@ async function generateMediainfo(config, doc, json) {
   })
 }
 
+function fileAdded(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+    .catch( error => {logger.error(error)})
+}
+function fileChanged(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+    .catch( error => {logger.error(error)})
+}
+function fileUnlinked(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return db.get(mediaId)
+    .then(db.remove)
+    .catch( error => {logger.error(error)})
+}
+
+async function cleanDeleted(config, db, logger) {
+  logger.info('Checking for dead media')
+
+  const limit = 256
+  let startkey
+  while (true) {
+    const deleted = []
+
+    const { rows } = await db.allDocs({
+      include_docs: true,
+      startkey,
+      limit
+    })
+    await Promise.all(rows.map(async ({ doc }) => {
+      try {
+        const mediaFolder = path.normalize(config.scanner.paths)
+        const mediaPath = path.normalize(doc.mediaPath)
+        if (mediaPath.indexOf(mediaFolder) === 0 && await fileExists(doc.mediaPath)) {
+          return
+        }
+
+        deleted.push({
+          _id: doc._id,
+          _rev: doc._rev,
+          _deleted: true
+        })
+      } catch (err) {
+        logger.error({ err, doc })
+      }
+    }))
+
+    await db.bulkDocs(deleted)
+
+    if (rows.length < limit) {
+      break
+    }
+    startkey = rows[rows.length - 1].doc._id
+  }
+
+  logger.info(`Finished check for dead media`)
+}
+
+function scanner({ config, db, logger }) {
+  const watcher = chokidar
+    .watch(config.scanner.paths, Object.assign({
+      alwaysStat: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 2000,
+        pollInterval: 1000
+      }
+    }, config.scanner))
+    .on('error', err => logger.error({ err }))
+    .on('add', (path, stat) => {
+      return fileAdded(path, stat, db, config, logger)
+    })
+    .on('change', (path, stat) => {
+      return fileChanged(path, stat, db, config, logger)
+    })
+    .on('unlink', (path, stat) => {
+      return fileUnlinked(path, stat, db, config, logger)
+    })
+
+  cleanDeleted(config, db, logger)
+  return watcher
+}
+
 module.exports = {
   generateThumb,
   generateInfo,
@@ -543,82 +660,5 @@ module.exports = {
   lookForFile,
   isScanningFile,
   killAllChildProcesses,
-  scanner: function ({ config, db, logger }) {
-    Observable
-      .create(o => {
-        const watcher = chokidar
-          .watch(config.scanner.paths, Object.assign({
-            alwaysStat: true,
-            awaitWriteFinish: {
-              stabilityThreshold: 2000,
-              pollInterval: 1000
-            }
-          }, config.scanner))
-          .on('error', err => logger.error({ err }))
-          .on('add', (path, stat) => o.next([path, stat]))
-          .on('change', (path, stat) => o.next([path, stat]))
-          .on('unlink', (path, stat) => o.next([path]))
-        return () => watcher.close()
-      })
-      // TODO (perf) groupBy + mergeMap with concurrency.
-      .concatMap(async ([mediaPath, mediaStat]) => {
-        const mediaId = getId(config.paths.media, mediaPath)
-        try {
-          if (!mediaStat) {
-            await db.remove(await db.get(mediaId))
-          } else {
-            await scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
-          }
-        } catch (err) {
-          if(err){
-            logger.error(err.stack)
-          }
-          logger.error({ err })
-        }
-      })
-      .subscribe()
-
-    async function cleanDeleted() {
-      logger.info('Checking for dead media')
-
-      const limit = 256
-      let startkey
-      while (true) {
-        const deleted = []
-
-        const { rows } = await db.allDocs({
-          include_docs: true,
-          startkey,
-          limit
-        })
-        await Promise.all(rows.map(async ({ doc }) => {
-          try {
-            const mediaFolder = path.normalize(config.scanner.paths)
-            const mediaPath = path.normalize(doc.mediaPath)
-            if (mediaPath.indexOf(mediaFolder) === 0 && await fileExists(doc.mediaPath)) {
-              return
-            }
-
-            deleted.push({
-              _id: doc._id,
-              _rev: doc._rev,
-              _deleted: true
-            })
-          } catch (err) {
-            logger.error({ err, doc })
-          }
-        }))
-
-        await db.bulkDocs(deleted)
-
-        if (rows.length < limit) {
-          break
-        }
-        startkey = rows[rows.length - 1].doc._id
-      }
-
-      logger.info(`Finished check for dead media`)
-    }
-    cleanDeleted()
-  }
+  scanner
 }
