@@ -117,6 +117,22 @@ module.exports = function ({ db, config, logger }) {
     res.send(`201 CINF OK\r\n${cinf}`)
   }))
 
+  function stepThrough(array, index) {
+    if (index === undefined) {
+      index = 0
+    }
+    if (index >= array.length) {
+      return
+    }
+    const item = array[index];
+    generateThumb(config, item).then(async () => {
+      await db.put(item)
+      stepThrough(array, index + 1)
+    }).catch(() => {
+      stepThrough(array, index + 1)
+    })
+  }
+
   app.get('/thumbnail/generate', wrap(async (req, res) => {
     res.set('content-type', 'text/plain')
 
@@ -124,26 +140,9 @@ module.exports = function ({ db, config, logger }) {
       const result = await db.allDocs({
         include_docs: true
       })
-      const files = result.rows.map(i => i.doc)  
+      const files = result.rows.map(i => i.doc)
       // set up a procedure to iterate through the results and generate thumbnails in sequence
-      function stepThrough (array, index) {
-        if (index === undefined) {
-          index = 0
-        }
-        if (index >= array.length) { 
-          return
-        }
-        const item = array[index];
-        generateThumb(config, item).then(async () => {
-          await db.put(item)
-          stepThrough(array, index + 1)
-        }).catch(() => {
-          stepThrough(array, index + 1)
-        })
-      }
-  
       stepThrough(files)
-  
       res.send(`202 THUMBNAIL GENERATE_ALL OK\r\n`)
     } catch (e) {
       logger.error(e)
@@ -161,12 +160,12 @@ module.exports = function ({ db, config, logger }) {
       try {
         await generateThumb(config, doc)
         db.put(doc)
-    
+
         res.send(`202 THUMBNAIL GENERATE OK\r\n`)
-      } catch(e) {
+      } catch (e) {
         logger.error(e)
         logger.error(e.stack)
-  
+
         res.send(`501 THUMBNAIL GENERATE ERROR\r\n`)
       }
     } catch (e) {
@@ -194,15 +193,15 @@ module.exports = function ({ db, config, logger }) {
     try {
       const doc = await db.get(req.params.id.toUpperCase())
       const mediaId = doc._id
-      
+
       try {
         await generatePreview(db, config, logger, mediaId)
-    
+
         res.send(`202 PREVIEW GENERATE OK\r\n`)
       } catch (e) {
         logger.error(e)
         logger.error(e.stack)
-  
+
         res.send(`500 PREVIEW GENERATE ERROR\r\n`)
       }
     } catch (e) {
@@ -233,13 +232,13 @@ module.exports = function ({ db, config, logger }) {
         res.send(`404 FILE NOT FOUND\r\n`)
         return
       }
-      
+
       await scanFile(db, config, logger, stat.mediaPath, stat.mediaId, stat.mediaStat)
-      .catch(error => {
-        logger.error({err: error})
-      })
+        .catch(error => {
+          logger.error({ err: error })
+        })
     }
-    
+
     res.set('content-type', 'text/plain')
     res.send(`202 MEDIA INFO GENERATE OK\r\n`)
   }))
@@ -253,7 +252,7 @@ module.exports = function ({ db, config, logger }) {
 
   app.get('/manualMode/:enabled', wrap(async (req, res) => {
     setManualMode(req.params.enabled.toLowerCase() === 'true')
-    
+
     logger.info(`Media Scanner is now in manual mode`)
 
     res.set('content-type', 'application/json')

@@ -16,7 +16,7 @@ module.exports = {
       .toUpperCase()
   },
 
-  async fileExists (destPath) {
+  async fileExists(destPath) {
     try {
       const stat = await statAsync(destPath)
       if (stat.isFile()) {
@@ -33,30 +33,34 @@ module.exports = {
    * Specifically, https://github.com/sebhildebrandt/systeminformation/blob/master/lib/filesystem.js#L40 has been
    * used.
    */
-  fsSize () {
-    return new Promise(resolve => {
+  fsSize() {
+    return new Promise((resolve, reject) => {
       process.nextTick(() => {
         const data = []
         switch (process.platform) {
-          case 'linux' :
-          case 'freebsd' :
-          case 'openbsd' :
-          case 'darwin' :
+          case 'linux':
+          case 'freebsd':
+          case 'openbsd':
+          case 'darwin':
             let cmd = ''
-            if (process.platform === 'darwin')
+            if (process.platform === 'darwin') {
               cmd = 'df -lkP | grep ^/'
-            if (process.platform === 'linux')
+            }
+            if (process.platform === 'linux') {
               cmd = 'df -lkPT | grep ^/'
-            if (process.platform === 'freebsd' || process.platform === 'openbsd')
+            }
+            if (process.platform === 'freebsd' || process.platform === 'openbsd') {
               cmd = 'df -lkPT'
+            }
             exec(cmd, function (error, stdout) {
               if (!error) {
-                let lines = stdout.toString().split('\n');
+                let lines = stdout.toString().split('\n')
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    let lineParts = line.replace(/ +/g, ' ').split(' ');
-                    if (lineParts && (lineParts[0].startsWith('/')) || (lineParts[6] && lineParts[6] === '/')) {
-                      const res  = {
+                    let lineParts = line.replace(/ +/g, ' ').split(' ')
+                    if ((lineParts && lineParts[0].startsWith('/'))
+                      || (lineParts[6] && lineParts[6] === '/')) {
+                      const res = {
                         fs: lineParts[0],
                         type: lineParts[1],
                         size: parseInt(lineParts[2]) * 1024,
@@ -65,7 +69,7 @@ module.exports = {
                         mount: lineParts[lineParts.length - 1]
                       }
                       if (process.platform === 'darwin') {
-                        res.type =  'HFS'
+                        res.type = 'HFS'
                         res.size = parseInt(lineParts[1]) * 1024
                         res.used = parseInt(lineParts[2]) * 1024
                       }
@@ -81,19 +85,23 @@ module.exports = {
                       data.push(res)
                     }
                   }
-                });
+                })
               }
               resolve(data)
             })
             break
-          case 'win32' :
+          case 'win32':
             try {
               // const wmic = os.type() === 'Windows_NT' && fs.existsSync(process.env.WINDIR + '\\system32\\wbem\\wmic.exe') ? wmic = process.env.WINDIR + '\\system32\\wbem\\wmic.exe' : 'wmic'
               exec('wmic logicaldisk get Caption,FileSystem,FreeSpace,Size', { windowsHide: true }, function (error, stdout) {
-                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+                if (error) {
+                  reject(error)
+                  return
+                }
+                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0)
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    let lineParts = line.trim().split(/\s\s+/);
+                    let lineParts = line.trim().split(/\s\s+/)
                     data.push({
                       'fs': lineParts[0],
                       'type': lineParts[1],
@@ -105,7 +113,7 @@ module.exports = {
                   }
                 })
                 resolve(data)
-              });
+              })
             } catch (e) {
               console.log(e)
               resolve(data)
