@@ -1,5 +1,5 @@
 // @ts-check
-const cp = require('child_process')
+const ChildProcess = require('child_process')
 const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
 const chokidar = require('chokidar')
@@ -35,7 +35,7 @@ async function lookForFile(mediaGeneralId, config) {
 function isScanningFile() {
   return isCurrentlyScanning
 }
-
+ 
 async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
   try {
     if(isCurrentlyScanning) {
@@ -82,7 +82,15 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
         })
       ])
     }
+    // TODO: IMPORTANT!! If for some reason anything prior to this fails, the watchdog will kill the process.
+    // That also means that if something is already running, and the watchdog tries to run something else, it will not go through, and kill the process.
+    // There is also a race condition;
+    // If something is already running, the watchdog will not run. OK
+    // If something is not running, the watchdog will run. OK
+    // If sometihng is not running, but starts to run right after the watchdog is running, then it will lock up, and fail the watchdog.
+    // Remedy; Perhas lock while the watchdog is running?
 
+    // Alternatively, we need to make some sort of queue to prevent these types of things from happening.
     await db.put(doc)
     isCurrentlyScanning = false
     mediaLogger.info('Scanned')
@@ -92,6 +100,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
   }
 }
 
+let runningThumbnailProcess = null
 async function generateThumb(config, doc) {
   const tmpPath = path.join(os.tmpdir(), Math.random().toString(16)) + '.png'
 
@@ -108,7 +117,10 @@ async function generateThumb(config, doc) {
 
   await mkdirp(path.dirname(tmpPath))
   await new Promise((resolve, reject) => {
-    cp.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+    runningThumbnailProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+    runningThumbnailProcess.on('exit', function(){ 
+      runningThumbnailProcess = null
+    })
   })
 
   const thumbStat = await statAsync(tmpPath)
@@ -129,7 +141,7 @@ async function generateThumb(config, doc) {
   }
   await unlinkAsync(tmpPath)
 }
-
+let runningffprobeProcess = null
 async function generateInfo(config, doc) {
   const json = await new Promise((resolve, reject) => {
     const args = [
@@ -141,7 +153,10 @@ async function generateInfo(config, doc) {
       '-show_format',
       '-print_format', 'json'
     ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
+    runningffprobeProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
+      runningffprobeProcess.on('exit', function(){ 
+        runningffprobeProcess = null
+      })
       if (err) {
         return reject(err)
       }
@@ -149,8 +164,8 @@ async function generateInfo(config, doc) {
       const json = JSON.parse(stdout)
       if (!json.streams || !json.streams[0]) {
         return reject(new Error('not media'))
-      }
-
+      } 
+      // TODO: Remove set-timeout here. Just testing that the thing works as expected
       resolve(json)
     })
   })
@@ -186,6 +201,24 @@ function generateCinf(config, doc, json) {
   ].join(' ') + '\r\n'
 }
 
+
+function killAllChildProcesses(){
+  if(runningMediaInfoProcess){
+    runningMediaInfoProcess.kill()
+  }
+  if(runningMediaInfoProcessRawVideo){
+    runningMediaInfoProcessRawVideo.kill()
+  }
+  if(runningThumbnailProcess){
+    runningThumbnailProcess.kill()
+  }
+  if(runningffprobeProcess){
+    runningffprobeProcess.kill()
+  }
+}
+
+let runningMediaInfoProcess = null
+let runningMediaInfoProcessRawVideo = null
 async function generateMediainfo(config, doc, json) {
   const fieldOrder = await new Promise((resolve, reject) => {
     if (!config.metadata.fieldOrder) {
@@ -202,7 +235,10 @@ async function generateMediainfo(config, doc, json) {
       '-f', 'rawvideo', '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
       '-i', `"${doc.mediaPath}"`
     ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
+    runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
+      runningMediaInfoProcessRawVideo.on('exit', function(){ 
+        runningMediaInfoProcessRawVideo = null
+      })
       if (err) {
         return reject(err)
       }
@@ -260,7 +296,10 @@ async function generateMediainfo(config, doc, json) {
       '-f', 'null',
       '-'
     ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
+    runningMediaInfoProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
+      runningMediaInfoProcess.on('exit', function(){ 
+        runningMediaInfoProcess = null
+      })
       if (err) {
         return reject(err)
       }
@@ -503,6 +542,7 @@ module.exports = {
   scanFile,
   lookForFile,
   isScanningFile,
+  killAllChildProcesses,
   scanner: function ({ config, db, logger }) {
     Observable
       .create(o => {
@@ -530,6 +570,9 @@ module.exports = {
             await scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
           }
         } catch (err) {
+          if(err){
+            logger.error(err.stack)
+          }
           logger.error({ err })
         }
       })

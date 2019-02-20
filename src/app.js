@@ -235,6 +235,9 @@ module.exports = function ({ db, config, logger }) {
 
       await scanFile(db, config, logger, stat.mediaPath, stat.mediaId, stat.mediaStat)
         .catch(error => {
+          if(error) {
+            logger.error(error.stack)
+          }
           logger.error({ err: error })
         })
     }

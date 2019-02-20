@@ -4,10 +4,10 @@
  * If it doesn't, kill the process and let the parent process restart it.
  */
 // const PouchDB = require('pouchdb-node')
-const { isScanningFile } = require('./scanner')
+const { isScanningFile, killAllChildProcesses } = require('./scanner')
 const fs = require('fs')
 const config = require('./config')
-
+const { killAllProcesses } = require('./previews')
 /** How often to run the watchdog */
 const CHECK_INTERVAL = 5 * 60 * 1000
 /** Maximum time to expect the changes in the database */
@@ -197,6 +197,7 @@ module.exports.startWatchDog = function (logger, db) {
       // Start the watchdog:
       const triggerWatchDog = () => {
         if (isScanningFile()) {
+          logger.info('Watchdog skipping. File processing')
           return
         }
         checkDatabaseFunctionality(logger, db, basePath, WATCHDOG_FILE)
@@ -209,6 +210,12 @@ module.exports.startWatchDog = function (logger, db) {
               logger.error(err.stack)
               logger.info(`Watchdog failed, shutting down!`)
               setTimeout(() => {
+                try {
+                  killAllChildProcesses()
+                  killAllProcesses()
+                } catch(error){
+                  logger.error('Error killing child processes')
+                }
                 process.exit(1) // This seems wrong. Why would the watchdog kill everything?
               }, 1 * 1000)
             } else {

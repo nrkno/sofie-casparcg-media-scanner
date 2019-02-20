@@ -1,5 +1,5 @@
 // @ts-check
-const cp = require('child_process')
+const ChildProcess = require('child_process')
 const { Observable } = require('@reactivex/rxjs')
 const util = require('util')
 const mkdirp = require('mkdirp-promise')
@@ -22,6 +22,14 @@ async function deletePreview (logger, mediaId) {
   })
   return
 }
+
+function killAllProcesses() {
+  if(runningFFMPEGGeneratePreviewProcess){
+    runningFFMPEGGeneratePreviewProcess.kill()
+  }
+}
+
+let runningFFMPEGGeneratePreviewProcess = null
 async function generatePreview (db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
@@ -59,7 +67,10 @@ async function generatePreview (db, config, logger, mediaId) {
     await mkdirp(path.dirname(tmpPath))
     mediaLogger.info('Starting preview generation')
     await new Promise((resolve, reject) => {
-      cp.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+      runningFFMPEGGeneratePreviewProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+      runningFFMPEGGeneratePreviewProcess.on('exit', function(){
+        runningFFMPEGGeneratePreviewProcess = null
+      })
     })
 
     const previewStat = await statAsync(tmpPath)
@@ -80,6 +91,7 @@ async function generatePreview (db, config, logger, mediaId) {
 
 module.exports = {
   generatePreview,
+  killAllProcesses,
   previews: function ({ config, db, logger }) {
     Observable
       .create(async o => {
