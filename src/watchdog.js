@@ -18,24 +18,24 @@ const WATCHDOG_FILE = 'watchdog.mov'
 async function cleanUpOldWatchdogFiles (logger, path) {
   try {
     const files = await promisify(fs.readdir, path)
-    for (let i in files) {
-      let fileName = files[i]
 
-      // Find any old watchdog files and remove them:
+    await Promise.all(files.map(fileName => {
       if (fileName.match(/_watchdogIgnore_/i)) {
         const filePath = `${path}/${fileName}`
 
         logger.info('Watchdog: Removing old file ' + fileName)
-        await removeFile(filePath)
+        return removeFile(filePath)
+      } else {
+        return Promise.resolve()
       }
-    }
+    }))
   } catch (err) {
     logger.error(err)
     logger.error(err.stack)
   }
 }
 
-async function doWhatWatchDogsDo (logger, db, path, fileName) {
+async function checkDatabaseFunctionality (logger, db, path, fileName) {
   const copyFileName = fileName.replace(/(.+)\.([^.]+)$/, `$1_watchdogIgnore_${Date.now()}.$2`)
 
   const inputPath = `${path}/${fileName}`
@@ -43,23 +43,39 @@ async function doWhatWatchDogsDo (logger, db, path, fileName) {
 
   logger.info('Watchdog check')
 
-  let createdFileId = null
+  let removeFileResolve = null
+  let removeFileReject = null
+  let removeFileResolved = false
+  let timeoutPromise = new Promise((resolve, reject) => {
+    removeFileResolve = resolve
+    removeFileReject = reject
+  })
+
   let createFileResolve = null
-  function hasCreatedFile (id) {
+  let createFileReject = null
+  let createFileResovled = false
+  let createFilePromise = new Promise((resolve, reject) => {
+    createFileResolve = resolve
+    createFileReject = reject
+  })
+
+  let createdFileId = null
+
+  let hasCreatedFile = (id) => {
     // Called when the file has appeared
     createdFileId = id
-    if (createFileResolve) {
+    if (!createFileResovled) {
       createFileResolve()
-      createFileResolve = null
+      createFileResovled = true
     }
   }
-  let removeFileResolve = null
-  function hasRemovedFile () {
+
+  let hasRemovedFile = () => {
     // Called when the file has appeared
     createdFileId = null
-    if (removeFileResolve) {
+    if (!removeFileResolved) {
       removeFileResolve()
-      removeFileResolve = null
+      removeFileResolved = true
     }
   }
 
@@ -84,7 +100,6 @@ async function doWhatWatchDogsDo (logger, db, path, fileName) {
         hasCreatedFile(change.id)
       }
     }
-    changesListener.cancel()
   })
   // First, we make a copy of a file, and expect to see the file in the database later:
 
@@ -94,36 +109,44 @@ async function doWhatWatchDogsDo (logger, db, path, fileName) {
 
   logger.info('Watchdog: wait for changes')
   // Wait for the change in pouchdb
-  await new Promise((resolve, reject) => {
-    createFileResolve = resolve
-    setTimeout(() => {
-      reject(new Error('Timeout: Created file didnt appear in database'))
-    }, EXPECT_TIME)
-  })
+
+  setTimeout(() => {
+    if (!createFileResovled) {
+      createFileReject(new Error('Timeout: Created file didnt appear in database'))
+    }
+  }, EXPECT_TIME)
+  await createFilePromise
 
   // Then, we remove the copy and expect to see the file removed from the database
   logger.info('Watchdog: remove file')
-  // Remove the file
+
   await removeFile(outputPath)
-
   logger.info('Watchdog: wait for changes')
-  // Wait for the change in pouchdb
-  await new Promise((resolve, reject) => {
-    removeFileResolve = resolve
-    setTimeout(() => {
-      reject(new Error('Timeout: Removed file wasnt removed from database'))
-    }, EXPECT_TIME)
-  })
 
+  setTimeout(() => {
+    if (!removeFileResolved) {
+      removeFileReject(new Error('Timeout: Removed file wasnt removed from database'))
+    }
+  }, EXPECT_TIME)
+  // Wait for the change in pouchdb
+  await timeoutPromise
+    .catch(err => {
+      changesListener.cancel()
+      return Promise.reject(err)
+    })
+    .then(data => {
+      changesListener.cancel()
+      return data
+    })
   // Looks good at this point.
 }
 
-function removeFile (path) {
+function removeFile(path) {
   // Remove file, and try again if not successful
 
   return new Promise((resolve, reject) => {
     let triesLeft = 5
-    function unlink () {
+    function unlink() {
       triesLeft--
       fs.unlink(path, (err) => {
         if (err) {
@@ -147,7 +170,7 @@ function removeFile (path) {
   })
 }
 
-function promisify (fcn) {
+function promisify(fcn) {
   let args = []
   for (let i in arguments) {
     args.push(arguments[i])
@@ -176,7 +199,7 @@ module.exports.startWatchDog = function (logger, db) {
         if (isScanningFile()) {
           return
         }
-        doWhatWatchDogsDo(logger, db, basePath, WATCHDOG_FILE)
+        checkDatabaseFunctionality(logger, db, basePath, WATCHDOG_FILE)
           .then(() => {
             logger.info('Watchdog ok')
           })
