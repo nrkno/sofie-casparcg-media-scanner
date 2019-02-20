@@ -16,6 +16,7 @@ const readFileAsync = util.promisify(fs.readFile)
 
 let isCurrentlyScanning = false
 
+const FILE_SCAN_RETRY_LIMIT = Number(process.env.FILE_SCAN_RETRY_LIMIT) || 3
 async function lookForFile(mediaGeneralId, config) {
   try {
     const mediaPath = path.join(config.paths.media, mediaGeneralId)
@@ -36,8 +37,13 @@ function isScanningFile() {
 }
 
 let filesToScan = {}
-
+let filesToScanFail = {}
+let retrying = false
 async function retryScan() {
+  if(retrying) {
+    return
+  }
+  retrying = true
   let redoRetry = false
   for (const fileObject of Object.values(filesToScan)) {
     // }
@@ -57,6 +63,7 @@ async function retryScan() {
         redoRetry = true
       })
   }
+  retrying = false
   if (redoRetry) {
     retryScan()
   }
@@ -67,9 +74,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
     if (!mediaId || mediaStat.isDirectory()) {
       return
     }
-    if (filesToScan[mediaId]) {
-      // File already in list to be scanned(probably)
-    } else {
+    if (!filesToScan[mediaId]) {
       filesToScan[mediaId] = {
         db, config, logger, mediaPath, mediaId, mediaStat
       }
@@ -92,12 +97,16 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
 
     if (doc.mediaPath && doc.mediaPath !== mediaPath) {
       mediaLogger.info('Skipped')
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
       isCurrentlyScanning = false
       return
     }
 
     if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
       isCurrentlyScanning = false
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
       return
     }
 
@@ -125,11 +134,20 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
 
     // Alternatively, we need to make some sort of queue to prevent these types of things from happening.
     await db.put(doc)
+    delete filesToScanFail[mediaId]
     delete filesToScan[mediaId]
     isCurrentlyScanning = false
     mediaLogger.info('Scanned')
+    retryScan()
   } catch (error) {
     isCurrentlyScanning = false
+    filesToScanFail[mediaId] = (filesToScanFail[mediaId] || 0) + 1
+    if(filesToScanFail[mediaId] >= FILE_SCAN_RETRY_LIMIT) {
+      logger.error('Skipping file. Too many retries; ' + mediaId)
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
+    }
+    retryScan()
     throw error
   }
 }
@@ -188,9 +206,6 @@ async function generateInfo(config, doc) {
       '-print_format', 'json'
     ]
     runningffprobeProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningffprobeProcess.on('exit', function () {
-        runningffprobeProcess = null
-      })
       if (err) {
         return reject(err)
       }
@@ -201,6 +216,9 @@ async function generateInfo(config, doc) {
       }
       // TODO: Remove set-timeout here. Just testing that the thing works as expected
       resolve(json)
+    })
+    runningffprobeProcess.on('exit', function () {
+      runningffprobeProcess = null
     })
   })
 
@@ -270,9 +288,6 @@ async function generateMediainfo(config, doc, json) {
       '-i', `"${doc.mediaPath}"`
     ]
     runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningMediaInfoProcessRawVideo.on('exit', function () {
-        runningMediaInfoProcessRawVideo = null
-      })
       if (err) {
         return reject(err)
       }
@@ -288,6 +303,9 @@ async function generateMediainfo(config, doc, json) {
       const fieldOrder = tff <= 10 && bff <= 10 ? 'progressive' : (tff > bff ? 'tff' : 'bff')
 
       resolve(fieldOrder)
+    })
+    runningMediaInfoProcessRawVideo.on('exit', function () {
+      runningMediaInfoProcessRawVideo = null
     })
   })
 
@@ -331,9 +349,6 @@ async function generateMediainfo(config, doc, json) {
       '-'
     ]
     runningMediaInfoProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
-      runningMediaInfoProcess.on('exit', function () {
-        runningMediaInfoProcess = null
-      })
       if (err) {
         return reject(err)
       }
@@ -401,6 +416,9 @@ async function generateMediainfo(config, doc, json) {
       }
 
       return resolve({ scenes, freezes, blacks })
+    })
+    runningMediaInfoProcess.on('exit', function () {
+      runningMediaInfoProcess = null
     })
   })
 
