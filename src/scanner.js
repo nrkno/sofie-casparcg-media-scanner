@@ -15,9 +15,10 @@ const unlinkAsync = util.promisify(fs.unlink)
 const readFileAsync = util.promisify(fs.readFile)
 
 let isCurrentlyScanning = false
+let currentScanId = 1
 
 const FILE_SCAN_RETRY_LIMIT = Number(process.env.FILE_SCAN_RETRY_LIMIT) || 3
-async function lookForFile(mediaGeneralId, config) {
+async function lookForFile (mediaGeneralId, config) {
   try {
     const mediaPath = path.join(config.paths.media, mediaGeneralId)
     const mediaStat = await statAsync(mediaPath)
@@ -32,22 +33,30 @@ async function lookForFile(mediaGeneralId, config) {
   }
 }
 
-function isScanningFile() {
+function isCurrentlyScanningFile () {
   return isCurrentlyScanning
+}
+/**
+ * Returns current running scan id (number), or false (boolean)
+ */
+function currentlyScanningFileId () {
+  if(isCurrentlyScanning){
+    return currentScanId
+  } else {
+    return false
+  }
 }
 
 let filesToScan = {}
 let filesToScanFail = {}
 let retrying = false
-async function retryScan() {
-  if(retrying) {
+async function retryScan () {
+  if (retrying) {
     return
   }
   retrying = true
   let redoRetry = false
   for (const fileObject of Object.values(filesToScan)) {
-    // }
-    // Object.values(filesToScan).forEach(fileObject => {
     await scanFile(
       fileObject.db,
       fileObject.config,
@@ -58,8 +67,7 @@ async function retryScan() {
       .then(() => {
         delete filesToScan[fileObject.mediaId]
       })
-      .catch(error => {
-        // Some sort of error. We want to retry this file, right?
+      .catch(() => {
         redoRetry = true
       })
   }
@@ -69,7 +77,7 @@ async function retryScan() {
   }
 }
 
-async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
+async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
   try {
     if (!mediaId || mediaStat.isDirectory()) {
       return
@@ -80,9 +88,10 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
       }
     }
     if (isCurrentlyScanning) {
-      return // Not quite sure about this, but lets try
+      return
     }
     isCurrentlyScanning = true
+    currentScanId = currentScanId + 1
 
     const doc = await db
       .get(mediaId)
@@ -124,15 +133,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
         })
       ])
     }
-    // TODO: IMPORTANT!! If for some reason anything prior to this fails, the watchdog will kill the process.
-    // That also means that if something is already running, and the watchdog tries to run something else, it will not go through, and kill the process.
-    // There is also a race condition;
-    // If something is already running, the watchdog will not run. OK
-    // If something is not running, the watchdog will run. OK
-    // If sometihng is not running, but starts to run right after the watchdog is running, then it will lock up, and fail the watchdog.
-    // Remedy; Perhas lock while the watchdog is running?
 
-    // Alternatively, we need to make some sort of queue to prevent these types of things from happening.
     await db.put(doc)
     delete filesToScanFail[mediaId]
     delete filesToScan[mediaId]
@@ -142,7 +143,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
   } catch (error) {
     isCurrentlyScanning = false
     filesToScanFail[mediaId] = (filesToScanFail[mediaId] || 0) + 1
-    if(filesToScanFail[mediaId] >= FILE_SCAN_RETRY_LIMIT) {
+    if (filesToScanFail[mediaId] >= FILE_SCAN_RETRY_LIMIT) {
       logger.error('Skipping file. Too many retries; ' + mediaId)
       delete filesToScanFail[mediaId]
       delete filesToScan[mediaId]
@@ -153,7 +154,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
 }
 
 let runningThumbnailProcess = null
-async function generateThumb(config, doc) {
+async function generateThumb (config, doc) {
   const tmpPath = path.join(os.tmpdir(), Math.random().toString(16)) + '.png'
 
   const args = [
@@ -194,7 +195,7 @@ async function generateThumb(config, doc) {
   await unlinkAsync(tmpPath)
 }
 let runningffprobeProcess = null
-async function generateInfo(config, doc) {
+async function generateInfo (config, doc) {
   const json = await new Promise((resolve, reject) => {
     const args = [
       // TODO (perf) Low priority process?
@@ -229,7 +230,7 @@ async function generateInfo(config, doc) {
   }
 }
 
-function generateCinf(config, doc, json) {
+function generateCinf (config, doc, json) {
   let tb = (json.streams[0].time_base || '1/25').split('/')
   let dur = parseFloat(json.format.duration) || (1 / 24)
 
@@ -253,8 +254,7 @@ function generateCinf(config, doc, json) {
   ].join(' ') + '\r\n'
 }
 
-
-function killAllChildProcesses() {
+function killAllChildProcesses () {
   if (runningMediaInfoProcess) {
     runningMediaInfoProcess.kill()
   }
@@ -271,7 +271,7 @@ function killAllChildProcesses() {
 
 let runningMediaInfoProcess = null
 let runningMediaInfoProcessRawVideo = null
-async function generateMediainfo(config, doc, json) {
+async function generateMediainfo (config, doc, json) {
   const fieldOrder = await new Promise((resolve, reject) => {
     if (!config.metadata.fieldOrder) {
       return resolve('unknown')
@@ -358,19 +358,19 @@ async function generateMediainfo(config, doc, json) {
       let freezes = []
 
       // Scenes
-      var regex = /Parsed_showinfo_(.*)pts_time:([\d.]+)\s+/g
+      let sceneRegex = /Parsed_showinfo_(.*)pts_time:([\d.]+)\s+/g
       let res
       do {
-        res = regex.exec(stderr)
+        res = sceneRegex.exec(stderr)
         if (res) {
           scenes.push(parseFloat(res[2]))
         }
       } while (res)
 
       // Black detect
-      var regex = /(black_start:)(\d+(.\d+)?)( black_end:)(\d+(.\d+)?)( black_duration:)(\d+(.\d+))?/g
+      let blackDetectRegex = /(black_start:)(\d+(.\d+)?)( black_end:)(\d+(.\d+)?)( black_duration:)(\d+(.\d+))?/g
       do {
-        res = regex.exec(stderr)
+        res = blackDetectRegex.exec(stderr)
         if (res) {
           blacks.push({
             start: res[2],
@@ -381,28 +381,28 @@ async function generateMediainfo(config, doc, json) {
       } while (res)
 
       // Freeze detect
-      regex = /(lavfi\.freezedetect\.freeze_start: )(\d+(.\d+)?)/g
+      let freezeDetectRegex = /(lavfi\.freezedetect\.freeze_start: )(\d+(.\d+)?)/g
       do {
-        res = regex.exec(stderr)
+        res = freezeDetectRegex.exec(stderr)
         if (res) {
           freezes.push({ start: res[2] })
         }
       } while (res)
 
-      regex = /(lavfi\.freezedetect\.freeze_duration: )(\d+(.\d+)?)/g
+      freezeDetectRegex = /(lavfi\.freezedetect\.freeze_duration: )(\d+(.\d+)?)/g
       let i = 0
       do {
-        res = regex.exec(stderr)
+        res = freezeDetectRegex.exec(stderr)
         if (res && freezes[i]) {
           freezes[i].duration = res[2]
           i++
         }
       } while (res)
 
-      regex = /(lavfi\.freezedetect\.freeze_end: )(\d+(.\d+)?)/g
+      freezeDetectRegex = /(lavfi\.freezedetect\.freeze_end: )(\d+(.\d+)?)/g
       i = 0
       do {
-        res = regex.exec(stderr)
+        res = freezeDetectRegex.exec(stderr)
         if (res && freezes[i]) {
           freezes[i].end = res[2]
           i++
@@ -462,9 +462,12 @@ async function generateMediainfo(config, doc, json) {
       })
 
       // now we add freezes that aren't coinciding with blacks
-      let freeze, interruptedFreeze = false
+      let freeze
+      let interruptedFreeze = false
       let freezes = []
-      const startFreeze = t => freeze = { start: t }
+      const startFreeze = (t) => {
+        freeze = { start: t }
+      }
       const endFreeze = t => {
         if (t === freeze.start) {
           freeze = undefined
@@ -588,24 +591,24 @@ async function generateMediainfo(config, doc, json) {
   })
 }
 
-function fileAdded(mediaPath, mediaStat, db, config, logger) {
+function fileAdded (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
-    .catch( error => {logger.error(error)})
+    .catch(error => { logger.error(error) })
 }
-function fileChanged(mediaPath, mediaStat, db, config, logger) {
+function fileChanged (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
-    .catch( error => {logger.error(error)})
+    .catch(error => { logger.error(error) })
 }
-function fileUnlinked(mediaPath, mediaStat, db, config, logger) {
+function fileUnlinked (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return db.get(mediaId)
     .then(db.remove)
-    .catch( error => {logger.error(error)})
+    .catch(error => { logger.error(error) })
 }
 
-async function cleanDeleted(config, db, logger) {
+async function cleanDeleted (config, db, logger) {
   logger.info('Checking for dead media')
 
   const limit = 256
@@ -647,7 +650,7 @@ async function cleanDeleted(config, db, logger) {
   logger.info(`Finished check for dead media`)
 }
 
-function scanner({ config, db, logger }) {
+function scanner ({ config, db, logger }) {
   const watcher = chokidar
     .watch(config.scanner.paths, Object.assign({
       alwaysStat: true,
@@ -676,7 +679,8 @@ module.exports = {
   generateInfo,
   scanFile,
   lookForFile,
-  isScanningFile,
+  isCurrentlyScanningFile,
+  currentlyScanningFileId,
   killAllChildProcesses,
   scanner
 }

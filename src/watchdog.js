@@ -4,14 +4,14 @@
  * If it doesn't, kill the process and let the parent process restart it.
  */
 // const PouchDB = require('pouchdb-node')
-const { isScanningFile, killAllChildProcesses } = require('./scanner')
+const { killAllChildProcesses, currentlyScanningFileId } = require('./scanner')
 const fs = require('fs')
 const config = require('./config')
 const { killAllProcesses } = require('./previews')
 /** How often to run the watchdog */
-const CHECK_INTERVAL = 5 * 60 * 1000
+const CHECK_INTERVAL = Number(process.env.MS_WATCHDOG_CHECK_INTERVAL) || 5 * 60 * 1000
 /** Maximum time to expect the changes in the database */
-const EXPECT_TIME = 30 * 1000
+const EXPECT_TIME = Number(process.env.MS_WATCHDOG_EXPECT_TIME) || 30 * 1000
 
 const WATCHDOG_FILE = 'watchdog.mov'
 
@@ -141,12 +141,12 @@ async function checkDatabaseFunctionality (logger, db, path, fileName) {
   // Looks good at this point.
 }
 
-function removeFile(path) {
+function removeFile (path) {
   // Remove file, and try again if not successful
 
   return new Promise((resolve, reject) => {
     let triesLeft = 5
-    function unlink() {
+    function unlink () {
       triesLeft--
       fs.unlink(path, (err) => {
         if (err) {
@@ -170,7 +170,7 @@ function removeFile(path) {
   })
 }
 
-function promisify(fcn) {
+function promisify (fcn) {
   let args = []
   for (let i in arguments) {
     args.push(arguments[i])
@@ -187,6 +187,7 @@ function promisify(fcn) {
 }
 
 let watchdogInterval
+let lastScan = null
 module.exports.startWatchDog = function (logger, db) {
   const basePath = config.scanner.paths
   const path = `${basePath}/${WATCHDOG_FILE}`
@@ -196,10 +197,18 @@ module.exports.startWatchDog = function (logger, db) {
     if (exists) {
       // Start the watchdog:
       const triggerWatchDog = () => {
-        if (isScanningFile()) {
+        let currentScan = currentlyScanningFileId()
+        if (currentScan && lastScan !== currentScan) {
+          lastScan = currentScan
           logger.info('Watchdog skipping. File processing')
           return
+        } else {
+          if(currentScan && lastScan === currentScan){
+            logger.info('Same scan blocking WatchDog two times in a row, forcing watchdog run')
+          }
         }
+        
+        lastScan = currentScan
         checkDatabaseFunctionality(logger, db, basePath, WATCHDOG_FILE)
           .then(() => {
             logger.info('Watchdog ok')
@@ -213,7 +222,7 @@ module.exports.startWatchDog = function (logger, db) {
                 try {
                   killAllChildProcesses()
                   killAllProcesses()
-                } catch(error){
+                } catch (error) {
                   logger.error('Error killing child processes')
                 }
                 process.exit(1) // This seems wrong. Why would the watchdog kill everything?
