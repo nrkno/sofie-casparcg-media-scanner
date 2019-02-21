@@ -8,10 +8,10 @@ const asyncUnlink = util.promisify(fs.unlink)
 const asyncStat = util.promisify(fs.stat)
 
 module.exports = {
-  getManualMode() {
+  getManualMode () {
     return manualMode
   },
-  setManualMode(mode) {
+  setManualMode (mode) {
     manualMode = !!mode
 
     if (manualMode) {
@@ -20,7 +20,7 @@ module.exports = {
       asyncUnlink('.manualMode').then(() => { }).catch((e) => console.log(`Could not persist manual mode: ${mode}`))
     }
   },
-  restoreManualMode() {
+  restoreManualMode () {
     asyncStat('.manualMode').then(() => {
       manualMode = true
     }).catch(() => {

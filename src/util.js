@@ -3,8 +3,6 @@ const path = require('path')
 const fs = require('fs')
 const util = require('util')
 const { exec } = require('child_process')
-const os = require('os')
-
 const statAsync = util.promisify(fs.stat)
 
 module.exports = {
@@ -16,7 +14,7 @@ module.exports = {
       .toUpperCase()
   },
 
-  async fileExists(destPath) {
+  async fileExists (destPath) {
     try {
       const stat = await statAsync(destPath)
       if (stat.isFile()) {
@@ -33,7 +31,7 @@ module.exports = {
    * Specifically, https://github.com/sebhildebrandt/systeminformation/blob/master/lib/filesystem.js#L40 has been
    * used.
    */
-  fsSize() {
+  fsSize () {
     return new Promise((resolve, reject) => {
       process.nextTick(() => {
         const data = []

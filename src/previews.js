@@ -2,7 +2,6 @@
 const ChildProcess = require('child_process')
 const util = require('util')
 const mkdirp = require('mkdirp-promise')
-const os = require('os')
 const fs = require('fs')
 const path = require('path')
 const { fileExists } = require('./util')
@@ -12,24 +11,23 @@ const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const renameAsync = util.promisify(fs.rename)
 
-async function deletePreview(logger, mediaId) {
+async function deletePreview (logger, mediaId) {
   const destPath = path.join('_previews', mediaId) + '.webm'
   await unlinkAsync(destPath).catch(err => {
     if (err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1) {
       logger.error(err)
     }
   })
-  return
 }
 
-function killAllProcesses() {
+function killAllProcesses () {
   if (runningFFMPEGGeneratePreviewProcess) {
     runningFFMPEGGeneratePreviewProcess.kill()
   }
 }
 
 let runningFFMPEGGeneratePreviewProcess = null
-async function generatePreview(db, config, logger, mediaId) {
+async function generatePreview (db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
     const doc = await db.get(mediaId)
@@ -87,7 +85,7 @@ async function generatePreview(db, config, logger, mediaId) {
     logger.error(err.stack)
   }
 }
-async function rowChanged(id, deleted, logger, db, config) {
+async function rowChanged (id, deleted, logger, db, config) {
   if (!getManualMode()) {
     if (deleted) {
       await deletePreview(logger, id)
@@ -97,7 +95,7 @@ async function rowChanged(id, deleted, logger, db, config) {
   }
 }
 
-async function previews({ config, db, logger }) {
+async function previews ({ config, db, logger }) {
   let changesListener = db.changes({
     since: 'now',
     live: true

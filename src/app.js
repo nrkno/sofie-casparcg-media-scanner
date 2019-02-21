@@ -124,7 +124,7 @@ module.exports = function ({ db, config, logger }) {
     if (index >= array.length) {
       return
     }
-    const item = array[index];
+    const item = array[index]
     generateThumb(config, item).then(async () => {
       await db.put(item)
       stepThrough(array, index + 1)
@@ -235,7 +235,7 @@ module.exports = function ({ db, config, logger }) {
 
       await scanFile(db, config, logger, stat.mediaPath, stat.mediaId, stat.mediaStat)
         .catch(error => {
-          if(error) {
+          if (error) {
             logger.error(error.stack)
           }
           logger.error({ err: error })
