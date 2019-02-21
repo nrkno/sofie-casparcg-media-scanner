@@ -15,6 +15,7 @@ async function deletePreview (logger, mediaId) {
   const destPath = path.join('_previews', mediaId) + '.webm'
   await unlinkAsync(destPath).catch(err => {
     if (err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1) {
+      logger.error(err.stack)
       logger.error(err)
     }
   })

@@ -659,7 +659,12 @@ function scanner ({ config, db, logger }) {
         pollInterval: 1000
       }
     }, config.scanner))
-    .on('error', err => logger.error({ err }))
+    .on('error', (err) => {
+      if(err){
+        logger.error(err.stack)
+      }
+      logger.error({ err })
+    })
     .on('add', (path, stat) => {
       return fileAdded(path, stat, db, config, logger)
     })
