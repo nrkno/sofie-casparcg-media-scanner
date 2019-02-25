@@ -6,6 +6,7 @@ const fs = require('fs')
 const path = require('path')
 const { fileExists } = require('./util')
 const { getManualMode } = require('./manual')
+const { crossPlatformKillProcess } = require('./processHandler')
 
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
@@ -23,7 +24,7 @@ async function deletePreview (logger, mediaId) {
 
 function killAllProcesses () {
   if (runningFFMPEGGeneratePreviewProcess) {
-    runningFFMPEGGeneratePreviewProcess.kill()
+    crossPlatformKillProcess(runningFFMPEGGeneratePreviewProcess)
   }
 }
 
@@ -36,7 +37,9 @@ async function generatePreview (db, config, logger, mediaId) {
       return
     }
 
-    if (doc.mediaPath.match(/_watchdogIgnore_/)) return // ignore watchdog file
+    if (doc.mediaPath.match(/_watchdogIgnore_/)) {
+      return // ignore watchdog file
+    }
 
     const mediaLogger = logger.child({
       id: mediaId,
@@ -103,7 +106,7 @@ async function previews ({ config, db, logger }) {
   }).on('change', change => {
     return rowChanged(change.id, change.deleted, logger, db, config)
   }).on('complete', info => {
-    logger.info('db connection completed')
+    logger.info('preview db connection completed')
   }).on('error', err => {
     logger.error({ err })
     logger.error(err.stack)

@@ -9,7 +9,7 @@ const path = require('path')
 const { getId, fileExists } = require('./util')
 const moment = require('moment')
 const { getManualMode } = require('./manual')
-
+const { crossPlatformKillProcess } = require('./processHandler')
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const readFileAsync = util.promisify(fs.readFile)
@@ -256,16 +256,16 @@ function generateCinf (config, doc, json) {
 
 function killAllChildProcesses () {
   if (runningMediaInfoProcess) {
-    runningMediaInfoProcess.kill()
+    crossPlatformKillProcess(runningMediaInfoProcess)
   }
   if (runningMediaInfoProcessRawVideo) {
-    runningMediaInfoProcessRawVideo.kill()
+    crossPlatformKillProcess(runningMediaInfoProcessRawVideo)
   }
   if (runningThumbnailProcess) {
-    runningThumbnailProcess.kill()
+    crossPlatformKillProcess(runningThumbnailProcess)
   }
   if (runningffprobeProcess) {
-    runningffprobeProcess.kill()
+    crossPlatformKillProcess(runningffprobeProcess)
   }
 }
 
@@ -284,7 +284,9 @@ async function generateMediainfo (config, doc, json) {
       '-filter:v', 'idet',
       '-frames:v', config.metadata.fieldOrderScanDuration,
       '-an',
-      '-f', 'rawvideo', '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
+      '-f', 'rawvideo',
+      '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
+      // '-threads 1', // Not needed. This is very quick even for big files.
       '-i', `"${doc.mediaPath}"`
     ]
     runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
@@ -338,6 +340,9 @@ async function generateMediainfo (config, doc, json) {
       filterString += `"select='gt(scene,${config.metadata.sceneThreshold})',showinfo"`
     }
 
+    // THIS IS VERY SLOW:
+    // If any of the three are true, very much so if all of them are true
+    // When using "scenes = true"
     const args = [
       // TODO (perf) Low priority process?
       config.paths.ffmpeg,
@@ -346,6 +351,7 @@ async function generateMediainfo (config, doc, json) {
       '-filter:v', filterString,
       '-an',
       '-f', 'null',
+      '-threads 1', // This needs to be configured for best performance/availability, but this is most likely io-bound any way
       '-'
     ]
     runningMediaInfoProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
