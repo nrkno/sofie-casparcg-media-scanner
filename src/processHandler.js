@@ -2,7 +2,10 @@ function killChildProcessWin32 (childProcess) {
   ChildProcess.spawn("taskkill", ["/pid", childProcess.pid, '/f', '/t']);
 }
 
-function crossPlatformKillProcess(childProcess) {
+function crossPlatformKillProcessIfValid(childProcess) {
+  if(!childProcess || !childProcess.pid) {
+    return
+  }
   switch (process.platform) {
     case 'linux':
     case 'freebsd':
@@ -15,5 +18,5 @@ function crossPlatformKillProcess(childProcess) {
 }
 
 module.exports = {
-  crossPlatformKillProcess
+  crossPlatformKillProcessIfValid
 }

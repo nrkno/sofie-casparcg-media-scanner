@@ -6,7 +6,7 @@ const fs = require('fs')
 const path = require('path')
 const { fileExists } = require('./util')
 const { getManualMode } = require('./manual')
-const { crossPlatformKillProcess } = require('./processHandler')
+const { crossPlatformKillProcessIfValid } = require('./processHandler')
 
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
@@ -23,9 +23,7 @@ async function deletePreview (logger, mediaId) {
 }
 
 function killAllProcesses () {
-  if (runningFFMPEGGeneratePreviewProcess) {
-    crossPlatformKillProcess(runningFFMPEGGeneratePreviewProcess)
-  }
+  crossPlatformKillProcessIfValid(runningFFMPEGGeneratePreviewProcess)
 }
 
 let runningFFMPEGGeneratePreviewProcess = null

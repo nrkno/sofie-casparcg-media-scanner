@@ -4,7 +4,7 @@
  * If it doesn't, kill the process and let the parent process restart it.
  */
 // const PouchDB = require('pouchdb-node')
-const { killAllChildProcesses, currentlyScanningFileId } = require('./scanner')
+const { killAllChildProcesses, currentlyScanningFileId, progressReport } = require('./scanner')
 const fs = require('fs')
 const config = require('./config')
 const { killAllProcesses } = require('./previews')
@@ -35,7 +35,7 @@ async function cleanUpOldWatchdogFiles (logger, path) {
   }
 }
 
-async function checkDatabaseFunctionality (logger, db, path, fileName) {
+async function checkScannerFunctionality (logger, db, path, fileName) {
   const copyFileName = fileName.replace(/(.+)\.([^.]+)$/, `$1_watchdogIgnore_${Date.now()}.$2`)
 
   const inputPath = `${path}/${fileName}`
@@ -188,6 +188,7 @@ function promisify (fcn) {
 
 let watchdogInterval
 let lastScan = null
+let previousProgressReport = null
 module.exports.startWatchDog = function (logger, db) {
   const basePath = config.scanner.paths
   const path = `${basePath}/${WATCHDOG_FILE}`
@@ -198,18 +199,21 @@ module.exports.startWatchDog = function (logger, db) {
       // Start the watchdog:
       const triggerWatchDog = () => {
         let currentScan = currentlyScanningFileId()
-        if (currentScan && lastScan !== currentScan) {
+        let currentProgressReport = progressReport()
+        if (currentProgressReport && currentProgressReport !== previousProgressReport) {
+        // if (currentScan && lastScan !== currentScan) {
+          previousProgressReport = currentProgressReport
           lastScan = currentScan
-          logger.info('Watchdog skipping. File processing')
+          logger.info('Watchdog skipping. File processing. ' + previousProgressReport.getTime())
           return
         } else {
           if(currentScan && lastScan === currentScan){
             logger.info('Same scan blocking WatchDog two times in a row, forcing watchdog run')
           }
         }
-        
+
         lastScan = currentScan
-        checkDatabaseFunctionality(logger, db, basePath, WATCHDOG_FILE)
+        checkScannerFunctionality(logger, db, basePath, WATCHDOG_FILE)
           .then(() => {
             logger.info('Watchdog ok')
           })
