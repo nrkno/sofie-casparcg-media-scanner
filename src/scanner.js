@@ -698,19 +698,17 @@ function scanner({ config, db, logger }) {
         pollInterval: 1000
       }
     }, config.scanner))
+    .on('add', (path, stat) => {
+      return fileAdded(path, stat, db, config, logger)
+    })
+    .on('change', (path, stat) => {
+      return fileChanged(path, stat, db, config, logger)
+    })
+    .on('unlink', (path, stat) => {
+      return fileUnlinked(path, stat, db, config, logger)
+    })
     .on('ready', () => {
-      // Ready. We need to wait for the ready event,
-      // or else we get change events that are bogus.
-      watcher
-        .on('add', (path, stat) => {
-          return fileAdded(path, stat, db, config, logger)
-        })
-        .on('change', (path, stat) => {
-          return fileChanged(path, stat, db, config, logger)
-        })
-        .on('unlink', (path, stat) => {
-          return fileUnlinked(path, stat, db, config, logger)
-        })
+      console.log('Watcher ready!')
     })
     .on('error', (err) => {
       if (err) {
