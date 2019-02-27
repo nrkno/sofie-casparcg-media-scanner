@@ -181,6 +181,9 @@ async function generateThumb(config, doc) {
 
   await mkdirp(path.dirname(tmpPath))
   await new Promise((resolve, reject) => {
+    if (runningThumbnailProcess) {
+      console.error('runningThumbnailProcess already exists')
+    }
     runningThumbnailProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
     runningThumbnailProcess.on('exit', function () {
       runningThumbnailProcess = null
@@ -217,6 +220,9 @@ async function generateInfo(config, doc) {
       '-show_format',
       '-print_format', 'json'
     ]
+    if (runningffprobeProcess) {
+      console.log('runningffprobeProcess already exists')
+    }
     runningffprobeProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
       if (err) {
         return reject(err)
@@ -266,14 +272,16 @@ function generateCinf(config, doc, json) {
 }
 
 function killAllChildProcesses() {
-  crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn)
-  crossPlatformKillProcessIfValid(runningMediaInfoProcessRawVideo)
-  crossPlatformKillProcessIfValid(runningThumbnailProcess)
-  crossPlatformKillProcessIfValid(runningffprobeProcess)
+  return Promise.all([
+    crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn),
+    crossPlatformKillProcessIfValid(runningMediaInfoProcessRawVideo),
+    crossPlatformKillProcessIfValid(runningThumbnailProcess),
+    crossPlatformKillProcessIfValid(runningffprobeProcess)])
 }
 
 let runningMediaInfoProcessSpawn = null
 let runningMediaInfoProcessRawVideo = null
+let alreadyScanning = false
 function getMetadata(config, doc, json) {
   return new Promise((resolve, reject) => {
     if (!config.metadata.scenes && !config.metadata.freezeDetection && !config.metadata.blackDetection) {
@@ -317,10 +325,18 @@ function getMetadata(config, doc, json) {
     ]
 
     let currentFrame = 0
+    if (alreadyScanning) {
+      console.log('We are already scannig. This could cause issues')
+    }
+    alreadyScanning = true
+    if (runningMediaInfoProcessSpawn) {
+      console.log('runningMediaInfoProcessSpawn already exists')
+    }
     runningMediaInfoProcessSpawn = ChildProcess.spawn(config.paths.ffmpeg, args, { shell: true })
     let scenes = []
     let freezes = []
     let blacks = []
+    //     crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn)
     runningMediaInfoProcessSpawn.stdout.on('data', (data) => {
       lastProgressReportTimestamp = new Date()
     })
@@ -397,8 +413,12 @@ function getMetadata(config, doc, json) {
       } else {
         reject(new Error('Ffmpeg failed with code ' + code))
       }
+      alreadyScanning = false
     })
-  });
+    runningMediaInfoProcessSpawn.on('exit', () => {
+      runningMediaInfoProcessSpawn = null
+    })
+  })
 }
 
 function getFieldOrder(config, doc) {
@@ -419,6 +439,9 @@ function getFieldOrder(config, doc) {
       // '-threads 1', // Not needed. This is very quick even for big files.
       '-i', `"${doc.mediaPath}"`
     ]
+    if (runningMediaInfoProcessRawVideo) {
+      console.log('runningMediaInfoProcessRawVideo already exists')
+    }
     runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
       if (err) {
         return reject(err)
@@ -674,7 +697,7 @@ async function cleanDeleted(config, db, logger) {
           _deleted: true
         })
       } catch (err) {
-        logger.error({ err, doc })
+        logger.error({ name: 'cleanDeleted', err, doc })
       }
     }))
 
@@ -708,13 +731,13 @@ function scanner({ config, db, logger }) {
       return fileUnlinked(path, stat, db, config, logger)
     })
     .on('ready', () => {
-      console.log('Watcher ready!')
+      logger.info('Watcher ready!')
     })
     .on('error', (err) => {
       if (err) {
         logger.error(err.stack)
       }
-      logger.error({ err })
+      logger.error({ name: 'chokidar', err })
     })
 
   cleanDeleted(config, db, logger)

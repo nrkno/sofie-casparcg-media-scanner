@@ -7,7 +7,7 @@
 const { killAllChildProcesses, currentlyScanningFileId, progressReport } = require('./scanner')
 const fs = require('fs')
 const config = require('./config')
-const { killAllProcesses } = require('./previews')
+const { KillAllAndClearQueue } = require('./processLimiter')
 /** How often to run the watchdog */
 const CHECK_INTERVAL = Number(process.env.MS_WATCHDOG_CHECK_INTERVAL) || 5 * 60 * 1000
 /** Maximum time to expect the changes in the database */
@@ -15,7 +15,7 @@ const EXPECT_TIME = Number(process.env.MS_WATCHDOG_EXPECT_TIME) || 30 * 1000
 
 const WATCHDOG_FILE = 'watchdog.mov'
 
-async function cleanUpOldWatchdogFiles (logger, path) {
+async function cleanUpOldWatchdogFiles(logger, path) {
   try {
     const files = await promisify(fs.readdir, path)
 
@@ -35,13 +35,13 @@ async function cleanUpOldWatchdogFiles (logger, path) {
   }
 }
 
-async function checkScannerFunctionality (logger, db, path, fileName) {
+async function checkScannerFunctionality(logger, db, path, fileName) {
   const copyFileName = fileName.replace(/(.+)\.([^.]+)$/, `$1_watchdogIgnore_${Date.now()}.$2`)
 
   const inputPath = `${path}/${fileName}`
   const outputPath = `${path}/${copyFileName}`
 
-  logger.info('Watchdog check')
+  logger.info('Watchdog: check')
 
   let removeFileResolve = null
   let removeFileReject = null
@@ -141,12 +141,12 @@ async function checkScannerFunctionality (logger, db, path, fileName) {
   // Looks good at this point.
 }
 
-function removeFile (path) {
+function removeFile(path) {
   // Remove file, and try again if not successful
 
   return new Promise((resolve, reject) => {
     let triesLeft = 5
-    function unlink () {
+    function unlink() {
       triesLeft--
       fs.unlink(path, (err) => {
         if (err) {
@@ -170,7 +170,7 @@ function removeFile (path) {
   })
 }
 
-function promisify (fcn) {
+function promisify(fcn) {
   let args = []
   for (let i in arguments) {
     args.push(arguments[i])
@@ -187,7 +187,7 @@ function promisify (fcn) {
 }
 
 let watchdogInterval
-let lastScan = null
+let previousScan = null
 let previousProgressReport = null
 module.exports.startWatchDog = function (logger, db) {
   const basePath = config.scanner.paths
@@ -201,35 +201,39 @@ module.exports.startWatchDog = function (logger, db) {
         let currentScan = currentlyScanningFileId()
         let currentProgressReport = progressReport()
         if (currentProgressReport && currentProgressReport !== previousProgressReport) {
-        // if (currentScan && lastScan !== currentScan) {
+          // if (currentScan && lastScan !== currentScan) {
           previousProgressReport = currentProgressReport
-          lastScan = currentScan
-          logger.info('Watchdog skipping. File processing. ' + previousProgressReport.getTime())
+          previousScan = currentScan
+          logger.info('Watchdog: skipping. File processing. ' + previousProgressReport.getTime())
           return
         } else {
-          if(currentScan && lastScan === currentScan){
+          if (currentScan && previousScan === currentScan) {
+            logger.info('Same scan blocking WatchDog two times in a row, forcing watchdog run')
+          }
+          if (currentProgressReport && previousProgressReport === currentProgressReport) {
             logger.info('Same scan blocking WatchDog two times in a row, forcing watchdog run')
           }
         }
 
-        lastScan = currentScan
+        previousScan = currentScan
         checkScannerFunctionality(logger, db, basePath, WATCHDOG_FILE)
           .then(() => {
-            logger.info('Watchdog ok')
+            logger.info('Watchdog: ok')
           })
           .catch(err => {
             if (err.toString().match(/Timeout:/)) {
-              logger.error(err)
-              logger.error(err.stack)
               logger.info(`Watchdog failed, shutting down!`)
               setTimeout(() => {
-                try {
-                  killAllChildProcesses()
-                  killAllProcesses()
-                } catch (error) {
-                  logger.error('Error killing child processes')
-                }
-                process.exit(1) // This seems wrong. Why would the watchdog kill everything?
+                Promise.all([
+                  killAllChildProcesses(),
+                  KillAllAndClearQueue()])
+                  .catch((error) => {
+                    logger.error('Error killing child processes')
+                    logger.error(error)
+                  })
+                  .then(() => {
+                    process.exit(1)
+                  })
               }, 1 * 1000)
             } else {
               logger.error('Error in watchdog:')
