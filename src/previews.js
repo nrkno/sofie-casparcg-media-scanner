@@ -6,13 +6,13 @@ const fs = require('fs')
 const path = require('path')
 const { fileExists } = require('./util')
 const { getManualMode } = require('./manual')
-const { crossPlatformKillProcessIfValid } = require('./processHandler')
+const { ProcessLimiter } = require('./processLimiter')
 
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const renameAsync = util.promisify(fs.rename)
 
-async function deletePreview (logger, mediaId) {
+async function deletePreview(logger, mediaId) {
   const destPath = path.join('_previews', mediaId) + '.webm'
   await unlinkAsync(destPath).catch(err => {
     if (err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1) {
@@ -22,23 +22,22 @@ async function deletePreview (logger, mediaId) {
   })
 }
 
-function killAllProcesses () {
-  crossPlatformKillProcessIfValid(runningFFMPEGGeneratePreviewProcess)
-}
-
-let runningFFMPEGGeneratePreviewProcess = null
-async function generatePreview (db, config, logger, mediaId) {
+let lastProgressReportTimestamp = new Date()
+let isCurrentlyScanning = false
+async function generatePreview(db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
     const doc = await db.get(mediaId)
-    if (doc.previewTime === doc.mediaTime && await fileExists(destPath)) {
-      return
-    }
 
     if (doc.mediaPath.match(/_watchdogIgnore_/)) {
       return // ignore watchdog file
     }
 
+    if (doc.previewTime === doc.mediaTime && await fileExists(destPath)) {
+      return
+    }
+
+    isCurrentlyScanning = true
     const mediaLogger = logger.child({
       id: mediaId,
       path: doc.mediaPath
@@ -47,8 +46,6 @@ async function generatePreview (db, config, logger, mediaId) {
     const tmpPath = destPath + '.new'
 
     const args = [
-      // TODO (perf) Low priority process?
-      config.paths.ffmpeg,
       '-hide_banner',
       '-y',
       '-threads 1',
@@ -65,12 +62,14 @@ async function generatePreview (db, config, logger, mediaId) {
 
     await mkdirp(path.dirname(tmpPath))
     mediaLogger.info('Starting preview generation')
-    await new Promise((resolve, reject) => {
-      runningFFMPEGGeneratePreviewProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
-      runningFFMPEGGeneratePreviewProcess.on('exit', function () {
-        runningFFMPEGGeneratePreviewProcess = null
+
+    await ProcessLimiter('previewFfmpeg', config.paths.ffmpeg, args,
+      () => {
+        lastProgressReportTimestamp = new Date()
+      },
+      () => {
+        lastProgressReportTimestamp = new Date()
       })
-    })
 
     const previewStat = await statAsync(tmpPath)
     doc.previewSize = previewStat.size
@@ -83,11 +82,12 @@ async function generatePreview (db, config, logger, mediaId) {
 
     mediaLogger.info('Finished preview generation')
   } catch (err) {
-    logger.error({ err })
+    logger.error({ name: 'generatePreview', err })
     logger.error(err.stack)
   }
+  isCurrentlyScanning = false
 }
-async function rowChanged (id, deleted, logger, db, config) {
+async function rowChanged(id, deleted, logger, db, config) {
   if (!getManualMode()) {
     if (deleted) {
       await deletePreview(logger, id)
@@ -97,7 +97,7 @@ async function rowChanged (id, deleted, logger, db, config) {
   }
 }
 
-async function previews ({ config, db, logger }) {
+async function previews({ config, db, logger }) {
   let changesListener = db.changes({
     since: 'now',
     live: true
@@ -106,7 +106,7 @@ async function previews ({ config, db, logger }) {
   }).on('complete', info => {
     logger.info('preview db connection completed')
   }).on('error', err => {
-    logger.error({ err })
+    logger.error({ name: 'previews', err })
     logger.error(err.stack)
   })
 
@@ -117,8 +117,16 @@ async function previews ({ config, db, logger }) {
   return changesListener
 }
 
+function progressReport() {
+  if (isCurrentlyScanning) {
+    return lastProgressReportTimestamp
+  } else {
+    return false
+  }
+}
+
 module.exports = {
   generatePreview,
-  killAllProcesses,
-  previews
+  previews,
+  progressReport
 }

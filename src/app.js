@@ -238,7 +238,7 @@ module.exports = function ({ db, config, logger }) {
           if (error) {
             logger.error(error.stack)
           }
-          logger.error({ err: error })
+          logger.error({ name: "scanFile", err: error })
         })
     }
 
