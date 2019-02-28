@@ -1,8 +1,8 @@
+// @ts-check
 const nconf = require('nconf')
 const pkg = require('../package.json')
 const fs = require('fs')
 const xml2js = require('xml2js')
-const path = require('path')
 
 const defaults = {
   caspar: {
@@ -29,12 +29,12 @@ const defaults = {
     scenes: false,
     sceneThreshold: 0.4,
     freezeDetection: false,
-    freezeNoise: .001,
+    freezeNoise: 0.001,
     freezeDuration: '2s',
     blackDetection: false,
     blackDuration: '2.0',
-    blackRatio: .98,
-    blackThreshold: .1,
+    blackRatio: 0.98,
+    blackThreshold: 0.1,
     mergeBlacksAndFreezes: true
   },
   previews: {
@@ -47,7 +47,7 @@ const defaults = {
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'trace',
     name: pkg.name,
-    prettyPrint: process.env.NODE_ENV !== 'production'
+    prettyPrint: true // process.env.NODE_ENV !== 'production'
   },
   http: {
     port: 8000

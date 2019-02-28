@@ -8,3 +8,12 @@ _media/
 casparcg.config
 *.exe
 .manualMode
+
+# Media Files
+*.png
+*.webm
+*.mov
+
+# Dist files
+*.zip
+dist*/

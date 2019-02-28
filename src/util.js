@@ -1,9 +1,8 @@
+// @ts-check
 const path = require('path')
 const fs = require('fs')
 const util = require('util')
 const { exec } = require('child_process')
-const os = require('os')
-
 const statAsync = util.promisify(fs.stat)
 
 module.exports = {
@@ -33,40 +32,44 @@ module.exports = {
    * used.
    */
   fsSize () {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       process.nextTick(() => {
         const data = []
         switch (process.platform) {
-          case 'linux' :
-          case 'freebsd' :
-          case 'openbsd' :
-          case 'darwin' :
+          case 'linux':
+          case 'freebsd':
+          case 'openbsd':
+          case 'darwin':
             let cmd = ''
-            if (process.platform === 'darwin')
+            if (process.platform === 'darwin') {
               cmd = 'df -lkP | grep ^/'
-            if (process.platform === 'linux')
+            }
+            if (process.platform === 'linux') {
               cmd = 'df -lkPT | grep ^/'
-            if (process.platform === 'freebsd' || process.platform === 'openbsd')
+            }
+            if (process.platform === 'freebsd' || process.platform === 'openbsd') {
               cmd = 'df -lkPT'
+            }
             exec(cmd, function (error, stdout) {
               if (!error) {
-                let lines = stdout.toString().split('\n');
+                let lines = stdout.toString().split('\n')
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    line = line.replace(/ +/g, ' ').split(' ');
-                    if (line && (line[0].startsWith('/')) || (line[6] && line[6] === '/')) {
-                      const res  = {
-                        fs: line[0],
-                        type: line[1],
-                        size: parseInt(line[2]) * 1024,
-                        used: parseInt(line[3]) * 1024,
-                        use: parseFloat(100 * line[3] / line[2]).toFixed(2),
-                        mount: line[line.length - 1]
+                    let lineParts = line.replace(/ +/g, ' ').split(' ')
+                    if ((lineParts && lineParts[0].startsWith('/'))
+                      || (lineParts[6] && lineParts[6] === '/')) {
+                      const res = {
+                        fs: lineParts[0],
+                        type: lineParts[1],
+                        size: parseInt(lineParts[2]) * 1024,
+                        used: parseInt(lineParts[3]) * 1024,
+                        use: (100 * parseFloat(lineParts[3]) / parseFloat(lineParts[2])).toFixed(2),
+                        mount: lineParts[lineParts.length - 1]
                       }
                       if (process.platform === 'darwin') {
-                        res.type =  'HFS'
-                        res.size = parseInt(line[1]) * 1024
-                        res.used = parseInt(line[2]) * 1024
+                        res.type = 'HFS'
+                        res.size = parseInt(lineParts[1]) * 1024
+                        res.used = parseInt(lineParts[2]) * 1024
                       }
                       res.use = (100 * res.size / res.used).toFixed(2)
                       // data.push({
@@ -80,31 +83,35 @@ module.exports = {
                       data.push(res)
                     }
                   }
-                });
+                })
               }
               resolve(data)
             })
             break
-          case 'win32' :
+          case 'win32':
             try {
               // const wmic = os.type() === 'Windows_NT' && fs.existsSync(process.env.WINDIR + '\\system32\\wbem\\wmic.exe') ? wmic = process.env.WINDIR + '\\system32\\wbem\\wmic.exe' : 'wmic'
               exec('wmic logicaldisk get Caption,FileSystem,FreeSpace,Size', { windowsHide: true }, function (error, stdout) {
-                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+                if (error) {
+                  reject(error)
+                  return
+                }
+                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0)
                 lines.forEach(function (line) {
                   if (line !== '') {
-                    line = line.trim().split(/\s\s+/);
+                    let lineParts = line.trim().split(/\s\s+/)
                     data.push({
-                      'fs': line[0],
-                      'type': line[1],
-                      'size': parseInt(line[3]),
-                      'used': parseInt(line[3]) - parseInt(line[2]),
-                      'use': parseFloat((100.0 * (parseInt(line[3]) - parseInt(line[2])) / parseInt(line[3])).toFixed(2)),
-                      'mount': line[0]
+                      'fs': lineParts[0],
+                      'type': lineParts[1],
+                      'size': parseInt(lineParts[3]),
+                      'used': parseInt(lineParts[3]) - parseInt(lineParts[2]),
+                      'use': parseFloat((100.0 * (parseInt(lineParts[3]) - parseInt(lineParts[2])) / parseInt(lineParts[3])).toFixed(2)),
+                      'mount': lineParts[0]
                     })
                   }
                 })
                 resolve(data)
-              });
+              })
             } catch (e) {
               console.log(e)
               resolve(data)

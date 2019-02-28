@@ -1,5 +1,5 @@
-const cp = require('child_process')
-const { Observable } = require('@reactivex/rxjs')
+// @ts-check
+const ChildProcess = require('child_process')
 const util = require('util')
 const chokidar = require('chokidar')
 const mkdirp = require('mkdirp-promise')
@@ -9,12 +9,16 @@ const path = require('path')
 const { getId, fileExists } = require('./util')
 const moment = require('moment')
 const { getManualMode } = require('./manual')
-
+const { crossPlatformKillProcessIfValid } = require('./processHandler')
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const readFileAsync = util.promisify(fs.readFile)
 
-async function lookForFile (mediaGeneralId, config) {
+let isCurrentlyScanning = false
+let currentScanId = 1
+
+const FILE_SCAN_RETRY_LIMIT = Number(process.env.FILE_SCAN_RETRY_LIMIT) || 3
+async function lookForFile(mediaGeneralId, config) {
   try {
     const mediaPath = path.join(config.paths.media, mediaGeneralId)
     const mediaStat = await statAsync(mediaPath)
@@ -29,51 +33,138 @@ async function lookForFile (mediaGeneralId, config) {
   }
 }
 
-async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
-  if (!mediaId || mediaStat.isDirectory()) {
-    return
-  }
-
-  const doc = await db
-    .get(mediaId)
-    .catch(() => ({ _id: mediaId }))
-
-  const mediaLogger = logger.child({
-    id: mediaId,
-    path: mediaPath,
-    size: mediaStat.size,
-    mtime: mediaStat.mtime.toISOString()
-  })
-
-  if (doc.mediaPath && doc.mediaPath !== mediaPath) {
-    mediaLogger.info('Skipped')
-    return
-  }
-
-  if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
-    return
-  }
-
-  doc.mediaPath = mediaPath
-  doc.mediaSize = mediaStat.size
-  doc.mediaTime = mediaStat.mtime.getTime()
-
-  if (!getManualMode()) {
-    await Promise.all([
-      generateInfo(config, doc).catch(err => {
-        mediaLogger.error({ err }, 'Info Failed')
-      }),
-      generateThumb(config, doc).catch(err => {
-        mediaLogger.error({ err }, 'Thumbnail Failed')
-      })
-    ])
-  }
-
-  await db.put(doc)
-
-  mediaLogger.info('Scanned')
+function isCurrentlyScanningFile() {
+  return isCurrentlyScanning
 }
 
+let lastProgressReportTimestamp = new Date()
+function progressReport() {
+  if (isCurrentlyScanning) {
+    return lastProgressReportTimestamp
+  } else {
+    return false
+  }
+}
+
+/**
+ * Returns current running scan id (number), or false (boolean)
+ */
+function currentlyScanningFileId() {
+  if (isCurrentlyScanning) {
+    return currentScanId
+  } else {
+    return false
+  }
+}
+
+let filesToScan = {}
+let filesToScanFail = {}
+let retrying = false
+async function retryScan() {
+  if (retrying) {
+    return
+  }
+  retrying = true
+  let redoRetry = false
+  for (const fileObject of Object.values(filesToScan)) {
+    await scanFile(
+      fileObject.db,
+      fileObject.config,
+      fileObject.logger,
+      fileObject.mediaPath,
+      fileObject.mediaId,
+      fileObject.mediaStat)
+      .then(() => {
+        delete filesToScan[fileObject.mediaId]
+      })
+      .catch(() => {
+        redoRetry = true
+      })
+  }
+  retrying = false
+  if (redoRetry) {
+    retryScan()
+  }
+}
+
+async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
+  try {
+    if (!mediaId || mediaStat.isDirectory()) {
+      return
+    }
+    if (!filesToScan[mediaId]) {
+      filesToScan[mediaId] = {
+        db, config, logger, mediaPath, mediaId, mediaStat
+      }
+    }
+    if (isCurrentlyScanning) {
+      return
+    }
+    isCurrentlyScanning = true
+    currentScanId = currentScanId + 1
+    lastProgressReportTimestamp = new Date()
+
+    const doc = await db
+      .get(mediaId)
+      .catch(() => ({ _id: mediaId }))
+
+    const mediaLogger = logger.child({
+      id: mediaId,
+      path: mediaPath,
+      size: mediaStat.size,
+      mtime: mediaStat.mtime.toISOString()
+    })
+
+    if (doc.mediaPath && doc.mediaPath !== mediaPath) {
+      mediaLogger.info('Skipped')
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
+      isCurrentlyScanning = false
+      return
+    }
+
+    if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
+      isCurrentlyScanning = false
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
+      return
+    }
+
+    doc.mediaPath = mediaPath
+    doc.mediaSize = mediaStat.size
+    doc.mediaTime = mediaStat.mtime.getTime()
+
+    if (!getManualMode()) {
+      await Promise.all([
+        generateInfo(config, doc).catch(err => {
+          mediaLogger.error({ err }, 'Info Failed')
+        }),
+        generateThumb(config, doc).catch(err => {
+          mediaLogger.error({ err }, 'Thumbnail Failed')
+        })
+      ])
+    }
+
+    await db.put(doc)
+    delete filesToScanFail[mediaId]
+    delete filesToScan[mediaId]
+    isCurrentlyScanning = false
+    mediaLogger.info('Scanned')
+    retryScan()
+  } catch (error) {
+    isCurrentlyScanning = false
+    filesToScanFail[mediaId] = (filesToScanFail[mediaId] || 0) + 1
+    if (filesToScanFail[mediaId] >= FILE_SCAN_RETRY_LIMIT) {
+      logger.error('Skipping file. Too many retries; ' + mediaId)
+      delete filesToScanFail[mediaId]
+      delete filesToScan[mediaId]
+    }
+    retryScan()
+    throw error
+  }
+}
+
+let runningThumbnailProcess = null
 async function generateThumb(config, doc) {
   const tmpPath = path.join(os.tmpdir(), Math.random().toString(16)) + '.png'
 
@@ -90,7 +181,13 @@ async function generateThumb(config, doc) {
 
   await mkdirp(path.dirname(tmpPath))
   await new Promise((resolve, reject) => {
-    cp.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+    if (runningThumbnailProcess) {
+      console.error('runningThumbnailProcess already exists')
+    }
+    runningThumbnailProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => err ? reject(err) : resolve())
+    runningThumbnailProcess.on('exit', function () {
+      runningThumbnailProcess = null
+    })
   })
 
   const thumbStat = await statAsync(tmpPath)
@@ -111,7 +208,7 @@ async function generateThumb(config, doc) {
   }
   await unlinkAsync(tmpPath)
 }
-
+let runningffprobeProcess = null
 async function generateInfo(config, doc) {
   const json = await new Promise((resolve, reject) => {
     const args = [
@@ -123,7 +220,10 @@ async function generateInfo(config, doc) {
       '-show_format',
       '-print_format', 'json'
     ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
+    if (runningffprobeProcess) {
+      console.log('runningffprobeProcess already exists')
+    }
+    runningffprobeProcess = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
       if (err) {
         return reject(err)
       }
@@ -132,15 +232,18 @@ async function generateInfo(config, doc) {
       if (!json.streams || !json.streams[0]) {
         return reject(new Error('not media'))
       }
-
+      // TODO: Remove set-timeout here. Just testing that the thing works as expected
       resolve(json)
+    })
+    runningffprobeProcess.on('exit', function () {
+      runningffprobeProcess = null
     })
   })
 
   doc.cinf = generateCinf(config, doc, json)
 
   if (config.metadata !== null) {
-    doc.mediainfo = await generateMediainfo(config, doc, json)
+    doc.mediainfo = await generateMediaInfo(config, doc, json)
   }
 }
 
@@ -168,8 +271,158 @@ function generateCinf(config, doc, json) {
   ].join(' ') + '\r\n'
 }
 
-async function generateMediainfo(config, doc, json) {
-  const fieldOrder = await new Promise((resolve, reject) => {
+function killAllChildProcesses() {
+  return Promise.all([
+    crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn),
+    crossPlatformKillProcessIfValid(runningMediaInfoProcessRawVideo),
+    crossPlatformKillProcessIfValid(runningThumbnailProcess),
+    crossPlatformKillProcessIfValid(runningffprobeProcess)])
+}
+
+let runningMediaInfoProcessSpawn = null
+let runningMediaInfoProcessRawVideo = null
+let alreadyScanning = false
+function getMetadata(config, doc, json) {
+  return new Promise((resolve, reject) => {
+    if (!config.metadata.scenes && !config.metadata.freezeDetection && !config.metadata.blackDetection) {
+      return resolve({})
+    }
+
+    let filterString = '' // String with combined filters.
+    if (config.metadata.blackDetection) {
+      filterString += `blackdetect=d=${config.metadata.blackDuration}:` +
+        `pic_th=${config.metadata.blackRatio}:` +
+        `pix_th=${config.metadata.blackThreshold}`
+    }
+
+    if (config.metadata.freezeDetection) {
+      if (filterString) {
+        filterString += ','
+      }
+      filterString += `freezedetect=n=${config.metadata.freezeNoise}:` +
+        `d=${config.metadata.freezeDuration}`
+    }
+
+    if (config.metadata.scenes) {
+      if (filterString) {
+        filterString += ','
+      }
+      filterString += `"select='gt(scene,${config.metadata.sceneThreshold})',showinfo"`
+    }
+
+    // This process is very slow, and will take a significant amount
+    // of time for big files. Consider a timeout, or something similar.
+    // The way this is implemented now means that a timeout could result
+    // in partial result, and not just "all or nothing".
+    const args = [
+      '-hide_banner',
+      '-i', `${doc.mediaPath}`,
+      '-filter:v', filterString,
+      '-an',
+      '-f', 'null',
+      '-threads', '1',
+      '-'
+    ]
+
+    let currentFrame = 0
+    if (alreadyScanning) {
+      console.log('We are already scannig. This could cause issues')
+    }
+    alreadyScanning = true
+    if (runningMediaInfoProcessSpawn) {
+      console.log('runningMediaInfoProcessSpawn already exists')
+    }
+    runningMediaInfoProcessSpawn = ChildProcess.spawn(config.paths.ffmpeg, args, { shell: true })
+    let scenes = []
+    let freezes = []
+    let blacks = []
+    //     crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn)
+    runningMediaInfoProcessSpawn.stdout.on('data', (data) => {
+      lastProgressReportTimestamp = new Date()
+    })
+
+    runningMediaInfoProcessSpawn.stderr.on('data', (data) => {
+      let stringData = data.toString()
+      lastProgressReportTimestamp = new Date()
+      if (typeof stringData === 'string' && stringData.match(/^frame= +\d+/)) {
+        currentFrame = Number(stringData.match(/^frame= +\d+/)[0].replace('frame=', ''))
+      } else if (typeof stringData === 'string') {
+        // Scenes
+        let sceneRegex = /Parsed_showinfo_(.*)pts_time:([\d.]+)\s+/g
+        let res
+        do {
+          res = sceneRegex.exec(stringData)
+          if (res) {
+            scenes.push(parseFloat(res[2]))
+          }
+        } while (res)
+
+        // Black detect
+        let blackDetectRegex = /(black_start:)(\d+(.\d+)?)( black_end:)(\d+(.\d+)?)( black_duration:)(\d+(.\d+))?/g
+        do {
+          res = blackDetectRegex.exec(stringData)
+          if (res) {
+            blacks.push({
+              start: res[2],
+              duration: res[8],
+              end: res[5]
+            })
+          }
+        } while (res)
+
+        // Freeze detect
+        let freezeDetectRegex = /(lavfi\.freezedetect\.freeze_start: )(\d+(.\d+)?)/g
+        do {
+          res = freezeDetectRegex.exec(stringData)
+          if (res) {
+            freezes.push({ start: res[2] })
+          }
+        } while (res)
+
+        freezeDetectRegex = /(lavfi\.freezedetect\.freeze_duration: )(\d+(.\d+)?)/g
+        let i = 0
+        do {
+          res = freezeDetectRegex.exec(stringData)
+          if (res && freezes[i]) {
+            freezes[i].duration = res[2]
+            i++
+          }
+        } while (res)
+
+        freezeDetectRegex = /(lavfi\.freezedetect\.freeze_end: )(\d+(.\d+)?)/g
+        i = 0
+        do {
+          res = freezeDetectRegex.exec(stringData)
+          if (res && freezes[i]) {
+            freezes[i].end = res[2]
+            i++
+          }
+        } while (res)
+      }
+    })
+
+    runningMediaInfoProcessSpawn.on('close', (code) => {
+      if (code === 0) {
+        // success
+        // if freeze frame is the end of video, it is not detected fully
+        if (freezes[freezes.length - 1] && !freezes[freezes.length - 1].end) {
+          freezes[freezes.length - 1].end = json.format.duration
+          freezes[freezes.length - 1].duration = json.format.duration - freezes[freezes.length - 1].start
+        }
+        resolve({ scenes, freezes, blacks })
+      } else {
+        reject(new Error('Ffmpeg failed with code ' + code))
+      }
+      alreadyScanning = false
+    })
+    runningMediaInfoProcessSpawn.on('exit', () => {
+      runningMediaInfoProcessSpawn = null
+    })
+  })
+}
+
+function getFieldOrder(config, doc) {
+  return new Promise((resolve, reject) => {
     if (!config.metadata.fieldOrder) {
       return resolve('unknown')
     }
@@ -181,10 +434,15 @@ async function generateMediainfo(config, doc, json) {
       '-filter:v', 'idet',
       '-frames:v', config.metadata.fieldOrderScanDuration,
       '-an',
-      '-f', 'rawvideo', '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
+      '-f', 'rawvideo',
+      '-y', (process.platform === 'win32' ? 'NUL' : '/dev/null'),
+      // '-threads 1', // Not needed. This is very quick even for big files.
       '-i', `"${doc.mediaPath}"`
     ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
+    if (runningMediaInfoProcessRawVideo) {
+      console.log('runningMediaInfoProcessRawVideo already exists')
+    }
+    runningMediaInfoProcessRawVideo = ChildProcess.exec(args.join(' '), (err, stdout, stderr) => {
       if (err) {
         return reject(err)
       }
@@ -201,118 +459,98 @@ async function generateMediainfo(config, doc, json) {
 
       resolve(fieldOrder)
     })
-  })
-
-  const metadata = await new Promise((resolve, reject) => {
-    if (!config.metadata.scenes && !config.metadata.freezeDetection && !config.metadata.blackDetection) {
-      return resolve({})
-    }
-
-    let filterString = '' // String with combined filters.
-    if (config.metadata.blackDetection) {
-      filterString += `blackdetect=d=${config.metadata.blackDuration}:` + 
-        `pic_th=${config.metadata.blackRatio}:` +
-        `pix_th=${config.metadata.blackThreshold}`
-        
-      if (config.metadata.freezeDetection || config.metadata.scenes) {
-        filterString += ','
-      }
-    }
-
-    if (config.metadata.freezeDetection) {
-      filterString += `freezedetect=n=${config.metadata.freezeNoise}:` +
-        `d=${config.metadata.freezeDuration}`
-        
-        if (config.metadata.scenes) {
-          filterString += ','
-        }
-    }
-
-    if (config.metadata.scenes) {
-      filterString += `"select='gt(scene,${config.metadata.sceneThreshold})',showinfo"`
-    }
-
-    const args = [
-      // TODO (perf) Low priority process?
-      config.paths.ffmpeg,
-      '-hide_banner',
-      '-i', `"${doc.mediaPath}"`,
-      '-filter:v', filterString,
-      '-an',
-      '-f', 'null',
-      '-'
-    ]
-    cp.exec(args.join(' '), (err, stdout, stderr) => {
-      if (err) {
-        return reject(err)
-      }
-
-      const scenes = []
-      const blacks = []
-      const freezes = []
-
-      // Scenes
-      var regex = /Parsed_showinfo_(.*)pts_time:([\d.]+)\s+/g
-      let res
-      do {
-        res = regex.exec(stderr)
-        if (res) {
-          scenes.push(parseFloat(res[2]))
-        }
-      } while (res)
-      
-      // Black detect
-      var regex = /(black_start:)(\d+(.\d+)?)( black_end:)(\d+(.\d+)?)( black_duration:)(\d+(.\d+))?/g
-      do {
-          res = regex.exec(stderr)
-          if (res) {
-              blacks.push({
-                  start: res[2],
-                  duration: res[8],
-                  end: res[5]
-              })
-          }
-      } while (res)
-
-      // Freeze detect
-      regex = /(lavfi\.freezedetect\.freeze_start: )(\d+(.\d+)?)/g
-      do {
-          res = regex.exec(stderr)
-          if (res) {
-              freezes.push({ start: res[2] })
-          }
-      } while (res)
-      
-      regex = /(lavfi\.freezedetect\.freeze_duration: )(\d+(.\d+)?)/g
-      let i = 0
-      do {
-          res = regex.exec(stderr)
-          if (res && freezes[i]) {
-              freezes[i].duration = res[2]
-              i++
-          }
-      } while (res)
-      
-      regex = /(lavfi\.freezedetect\.freeze_end: )(\d+(.\d+)?)/g
-      i = 0
-      do {
-          res = regex.exec(stderr)
-          if (res && freezes[i]) {
-              freezes[i].end = res[2]
-              i++
-          }
-      } while (res)
-
-      // if freeze frame is the end of video, it is not detected fully
-      if (freezes[freezes.length - 1] && !freezes[freezes.length - 1].end) {
-        freezes[freezes.length - 1].end = json.format.duration
-        freezes[freezes.length - 1].duration = json.format.duration - freezes[freezes.length - 1].start
-      }
-
-      return resolve({ scenes, freezes, blacks })
+    runningMediaInfoProcessRawVideo.on('exit', function () {
+      runningMediaInfoProcessRawVideo = null
     })
-  })
-  
+  });
+}
+
+function sortBlackFreeze(tl) {
+  return tl.sort((a, b) => {
+    if (a.time > b.time) {
+      return 1
+    } else if (a.time === b.time) {
+      if ((a.isBlack && b.isBlack) || !(a.isBlack || b.isBlack)) {
+        return 0
+      } else {
+        if (a.isBlack && a.type === 'start') {
+          return 1
+        } else if (a.isBlack && a.type === 'end') {
+          return -1
+        } else {
+          return 0
+        }
+      }
+    } else {
+      return -1
+    }
+  });
+}
+
+function updateFreezeStartEnd(tl) {
+  let freeze
+  let interruptedFreeze = false
+  let freezes = []
+  const startFreeze = (t) => {
+    freeze = { start: t }
+  }
+  const endFreeze = t => {
+    if (t === freeze.start) {
+      freeze = undefined
+      return
+    }
+    if (!freeze) return
+    freeze.end = t
+    freeze.duration = t - freeze.start
+    freezes.push(freeze)
+    freeze = undefined
+  }
+
+  for (const ev of tl) {
+    if (ev.type === 'start') {
+      if (ev.isBlack) {
+        if (freeze) {
+          interruptedFreeze = true
+          endFreeze(ev.time)
+        }
+      } else {
+        startFreeze(ev.time)
+      }
+    } else {
+      if (ev.isBlack) {
+        if (interruptedFreeze) {
+          startFreeze(ev.time)
+          interruptedFreeze = false
+        }
+      } else {
+        if (freeze) {
+          endFreeze(ev.time)
+        } else {
+          const freeze = freezes[freezes.length - 1]
+          if (freeze) {
+            freeze.end = ev.time
+            freeze.duration = ev.time - freeze.start
+            interruptedFreeze = false
+          }
+        }
+      }
+    }
+  }
+  return freezes
+}
+
+async function generateMediaInfo(config, doc, json) {
+  // TODO: We can the below
+  // However; CPU usage is a concern, and I don't know how that
+  // will be affected by such a parallel system.
+  // const [fieldOrder, metadata] = await Promise.all([
+  //   getFieldOrder(config, doc),
+  //   getMetadata(config, doc, json)])
+
+  const fieldOrder = await getFieldOrder(config, doc)
+  const metadata = await getMetadata(config, doc, json)
+
+
   if (config.metadata.mergeBlacksAndFreezes) {
     if (
       metadata.blacks &&
@@ -322,7 +560,7 @@ async function generateMediainfo(config, doc, json) {
     ) {
       // blacks are subsets of freezes, so we can remove the freeze frame warnings during a black
       // in order to do this we create a linear timeline:
-      const tl = []
+      let tl = []
       for (const black of metadata.blacks) {
         tl.push({ time: black.start, type: 'start', isBlack: true })
         tl.push({ time: black.end, type: 'end', isBlack: true })
@@ -332,87 +570,23 @@ async function generateMediainfo(config, doc, json) {
         tl.push({ time: freeze.end, type: 'end', isBlack: false })
       }
       // then we sort it for time, if black & freeze start at the same time make sure black is inside the freeze
-      tl.sort((a, b) => {
-        if (a.time > b.time) {
-          return 1
-        } else if (a.time === b.time) {
-          if ((a.isBlack && b.isBlack) || !(a.isBlack || b.isBlack)) {
-            return 0
-          } else {
-            if (a.isBlack && a.type === 'start') {
-              return 1
-            } else if (a.isBlack && a.type === 'end') {
-              return -1
-            } else {
-              return 0
-            }
-          }
-        } else {
-          return -1
-        }
-      })
+      tl = sortBlackFreeze(tl)
 
       // now we add freezes that aren't coinciding with blacks
-      let freeze, interruptedFreeze = false
-      freezes = []
-      const startFreeze = t => freeze = { start: t }
-      const endFreeze = t => {
-        if (t === freeze.start) {
-          freeze = undefined
-          return
-        }
-        if (!freeze) return
-        freeze.end = t
-        freeze.duration = t - freeze.start
-        freezes.push(freeze)
-        freeze = undefined
-      }
-
-      for (const ev of tl) {
-        if (ev.type === 'start') {
-          if (ev.isBlack) {
-            if (freeze) {
-              interruptedFreeze = true
-              endFreeze(ev.time)
-            }
-          } else {
-            startFreeze(ev.time)
-          }
-        } else {
-          if (ev.isBlack) {
-            if (interruptedFreeze) {
-              startFreeze(ev.time)
-              interruptedFreeze = false
-            }
-          } else {
-            if (freeze) {
-              endFreeze(ev.time)
-            } else {
-              const freeze = freezes[freezes.length - 1]
-              if (freeze) {
-                freeze.end = ev.time
-                freeze.duration = ev.time - freeze.start
-                interruptedFreeze = false
-              }
-            }
-          }
-        }
-      }
-
-      metadata.freezes = freezes
+      metadata.freezes = updateFreezeStartEnd(tl)
     }
   }
-  
+
   let type = 'AUDIO'
   if (json.streams[0].pix_fmt) {
     type = (parseFloat(json.format.duration) || 0) <= (1 / 24) ? 'STILL' : 'MOVIE'
   }
-  
+
   const tryToCast = val => isNaN(Number(val)) ? val : Number(val)
   const tryToCastDoc = doc => {
     for (let key in doc) {
       let type = typeof doc[key]
-      if (type === 'object' || type === 'array') {
+      if (type === 'object') {
         doc[key] = tryToCastDoc(doc[key])
       } else {
         doc[key] = tryToCast(doc[key])
@@ -479,84 +653,105 @@ async function generateMediainfo(config, doc, json) {
   })
 }
 
+function fileAdded(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+    .catch(error => { logger.error(error) })
+}
+function fileChanged(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+    .catch(error => { logger.error(error) })
+}
+function fileUnlinked(mediaPath, mediaStat, db, config, logger) {
+  const mediaId = getId(config.paths.media, mediaPath)
+  return db.get(mediaId)
+    .then(db.remove)
+    .catch(error => { logger.error(error) })
+}
+
+async function cleanDeleted(config, db, logger) {
+  logger.info('Checking for dead media')
+
+  const limit = 256
+  let startkey
+  while (true) {
+    const deleted = []
+
+    const { rows } = await db.allDocs({
+      include_docs: true,
+      startkey,
+      limit
+    })
+    await Promise.all(rows.map(async ({ doc }) => {
+      try {
+        const mediaFolder = path.normalize(config.scanner.paths)
+        const mediaPath = path.normalize(doc.mediaPath)
+        if (mediaPath.indexOf(mediaFolder) === 0 && await fileExists(doc.mediaPath)) {
+          return
+        }
+
+        deleted.push({
+          _id: doc._id,
+          _rev: doc._rev,
+          _deleted: true
+        })
+      } catch (err) {
+        logger.error({ name: 'cleanDeleted', err, doc })
+      }
+    }))
+
+    await db.bulkDocs(deleted)
+
+    if (rows.length < limit) {
+      break
+    }
+    startkey = rows[rows.length - 1].doc._id
+  }
+
+  logger.info(`Finished check for dead media`)
+}
+
+function scanner({ config, db, logger }) {
+  const watcher = chokidar
+    .watch(config.scanner.paths, Object.assign({
+      alwaysStat: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 4000,
+        pollInterval: 1000
+      }
+    }, config.scanner))
+    .on('add', (path, stat) => {
+      return fileAdded(path, stat, db, config, logger)
+    })
+    .on('change', (path, stat) => {
+      return fileChanged(path, stat, db, config, logger)
+    })
+    .on('unlink', (path, stat) => {
+      return fileUnlinked(path, stat, db, config, logger)
+    })
+    .on('ready', () => {
+      logger.info('Watcher ready!')
+    })
+    .on('error', (err) => {
+      if (err) {
+        logger.error(err.stack)
+      }
+      logger.error({ name: 'chokidar', err })
+    })
+
+  cleanDeleted(config, db, logger)
+  return watcher
+}
+
 module.exports = {
   generateThumb,
   generateInfo,
   scanFile,
   lookForFile,
-  scanner: function ({ config, db, logger }) {
-    Observable
-      .create(o => {
-        const watcher = chokidar
-          .watch(config.scanner.paths, Object.assign({
-            alwaysStat: true,
-            awaitWriteFinish: {
-              stabilityThreshold: 2000,
-              pollInterval: 1000
-            }
-          }, config.scanner))
-          .on('error', err => logger.error({ err }))
-          .on('add', (path, stat) => o.next([ path, stat ]))
-          .on('change', (path, stat) => o.next([ path, stat ]))
-          .on('unlink', (path, stat) => o.next([ path ]))
-        return () => watcher.close()
-      })
-      // TODO (perf) groupBy + mergeMap with concurrency.
-      .concatMap(async ([ mediaPath, mediaStat ]) => {
-        const mediaId = getId(config.paths.media, mediaPath)
-        try {
-          if (!mediaStat) {
-            await db.remove(await db.get(mediaId))
-          } else {
-            await scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
-          }
-        } catch (err) {
-          logger.error({ err })
-        }
-      })
-      .subscribe()
-
-    async function cleanDeleted () {
-      logger.info('Checking for dead media')
-
-      const limit = 256
-      let startkey
-      while (true) {
-        const deleted = []
-
-        const { rows } = await db.allDocs({
-          include_docs: true,
-          startkey,
-          limit
-        })
-        await Promise.all(rows.map(async ({ doc }) => {
-          try {
-            const mediaFolder = path.normalize(config.scanner.paths)
-            const mediaPath = path.normalize(doc.mediaPath)
-            if (mediaPath.indexOf(mediaFolder) === 0 && await fileExists(doc.mediaPath)) {
-              return
-            }
-
-            deleted.push({
-              _id: doc._id,
-              _rev: doc._rev,
-              _deleted: true
-            })
-          } catch (err) {
-            logger.error({ err, doc })
-          }
-        }))
-
-        await db.bulkDocs(deleted)
-
-        if (rows.length < limit) {
-          break
-        }
-        startkey = rows[rows.length - 1].doc._id
-      }
-
-      logger.info(`Finished check for dead media`)
-    }
-    cleanDeleted()
-  }
+  isCurrentlyScanningFile,
+  progressReport,
+  currentlyScanningFileId,
+  killAllChildProcesses,
+  scanner
 }

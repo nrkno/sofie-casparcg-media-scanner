@@ -1,10 +1,11 @@
+// @ts-check
 const pino = require('pino')
 const config = require('./config')
 const PouchDB = require('pouchdb-node')
 const { scanner } = require('./scanner')
 const { previews } = require('./previews')
 const app = require('./app')
-const startWatchDog = require('./watchdog')
+const WatchDog = require('./watchdog')
 
 const logger = pino(Object.assign({}, config.logger, {
   serializers: {
@@ -13,13 +14,17 @@ const logger = pino(Object.assign({}, config.logger, {
 }))
 
 const db = new PouchDB('_media') // `http://localhost:${config.http.port}/db/_media`)
-
+logger.info('STARTING')
 logger.info(config)
 
-scanner({ logger, db, config })
-app({ logger, db, PouchDB, config }).listen(config.http.port)
+let scannerListener = scanner({ logger, db, config })
+// scannerListener.cancel() to stop
+
+app({ logger, db, config }).listen(config.http.port)
 
 if (config.previews.enable) {
-  previews({ logger, db, config })
+  let previewListener = previews({ logger, db, config })
+  // previewListener.cancel() to stop
 }
-startWatchDog(logger, db)
+logger.info('STARTING watchdog')
+WatchDog.startWatchDog(logger, db)
