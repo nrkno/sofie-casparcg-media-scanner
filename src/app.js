@@ -152,22 +152,116 @@ module.exports = function ({ db, config, logger }) {
     }
   }))
 
+  function metaGenerate(res, idString ,dbGeneration, name, fileStat) {
+    res.set('content-type', 'text/plain')
+    if (dbGeneration[idString] && !dbGeneration[idString].done) {
+      res.send(`203 ${name} BEING PROCESSED\r\n`)
+      return
+    }
+
+    dbGeneration[idString] = {
+      done: false,
+      status: 'processing',
+      error: false
+    }
+    db.get(idString)
+      .then(doc => {
+        switch (name) {
+          case 'THUMBNAIL GENERATE':
+            return generateThumb(config, doc)
+            .then(() => {
+              return db.put(doc)
+            })
+          case 'PREVIEW GENERATE':
+            const mediaId = doc._id
+            return generatePreview(db, config, logger, mediaId)
+          case 'MEDIA INFO':
+            return generateInfo(config, doc)
+            .then(() => {
+              return db.put(doc)
+            })
+            .then(() => {
+              logger.info(`Generated info for "${idString}"`)
+              dbGeneration[idString].status = 'success'
+            })
+          default:
+            return Promise.reject(new Error('Invalid Name ' + name))
+        }
+      })
+      .then(() => {
+        dbGeneration[idString].status = 'success'
+        dbGeneration[idString].done = true
+      })
+      .catch(error => {
+        if(name === 'MEDIA INFO') {
+          dbGeneration[idString].error = error
+          dbGeneration[idString].status = 'degraded'
+          return scanFile(db, config, logger, fileStat.mediaPath, fileStat.mediaId, fileStat.mediaStat)
+            .then((data) => {
+              dbGeneration[idString].status = 'success'
+              return data
+            })
+        }
+        return Promise.reject(error)
+      })
+      .catch(error => {
+        logger.error(error)
+        logger.error(error.stack)
+
+        dbGeneration[idString].status = 'error'
+        dbGeneration[idString].error = error
+        dbGeneration[idString].done = true
+      })
+    res.send(`202 ${name} QUEUED OK\r\n`)
+  }
+
+  function metaStatus(id, name, dbGeneration, req, res){
+    const preserveState = req.query.preserveState
+    if (dbGeneration[id]) {
+      switch (dbGeneration[id].status) {
+        case 'success':
+          res.send(`202 ${name} OK\r\n`)
+          if (!preserveState) { dbGeneration[id] = undefined }
+          return
+        case 'processing':
+        case 'degraded':
+          res.send(`203 ${name} IN PROGRESS\r\n`)
+          return
+        case 'error':
+          res.send(`500 ${name} ERROR\r\n`)
+          if (!preserveState) { dbGeneration[id] = undefined }
+          return
+        default:
+          res.send(`500 UNKNOWN STATUS: ${dbGeneration[id].status}\r\n`)
+          if (dbGeneration[id].done && !preserveState) { dbGeneration[id] = undefined }
+          return
+      }
+    } else {
+      res.send(`404 ${name} NOT FOUND\r\n`)
+      return
+    }
+  }
+
+  let ongoingThumbnailGeneration = {}
+  app.post('/thumbnail/generateAsync/:id', wrap(async (req, res) => {
+    let thumbnailId = req.params.id.toUpperCase()
+    metaGenerate(res, thumbnailId, ongoingThumbnailGeneration, 'THUMBNAIL GENERATE')
+  }))
+
+  app.get('/thumbnail/generateAsync/:id', wrap(async (req, res) => {
+    let thumbnailId = req.params.id.toUpperCase()
+    metaStatus(thumbnailId, 'THUMBNAIL GENERATE', ongoingThumbnailGeneration, req, res)
+  }))
+
   app.get('/thumbnail/generate/:id', wrap(async (req, res) => {
     res.set('content-type', 'text/plain')
 
     try {
       const doc = await db.get(req.params.id.toUpperCase())
-      try {
-        await generateThumb(config, doc)
-        db.put(doc)
+      await generateThumb(config, doc)
+      db.put(doc)
 
-        res.send(`202 THUMBNAIL GENERATE OK\r\n`)
-      } catch (e) {
-        logger.error(e)
-        logger.error(e.stack)
-
-        res.send(`501 THUMBNAIL GENERATE ERROR\r\n`)
-      }
+      res.send(`202 THUMBNAIL GENERATE OK\r\n`)
     } catch (e) {
       logger.error(e)
       logger.error(e.stack)
@@ -187,6 +281,16 @@ module.exports = function ({ db, config, logger }) {
     res.send(`200 THUMBNAIL LIST OK\r\n${str}\r\n`)
   }))
 
+  let ongoingPreviewGenerations = {}
+  app.post('/preview/generateAsync/:id', wrap(async (req, res) => {
+    let previewId = req.params.id.toUpperCase()
+    metaGenerate(res, previewId, ongoingPreviewGenerations, 'PREVIEW GENERATE')
+  }))
+  app.get('/preview/generateAsync/:id', wrap(async (req, res) => {
+    let previewId = req.params.id.toUpperCase()
+    metaStatus(previewId, 'PREVIEW GENERATE', ongoingPreviewGenerations, req, res)
+  }))
+
   app.get('/preview/generate/:id', wrap(async (req, res) => {
     res.set('content-type', 'text/plain')
 
@@ -194,22 +298,47 @@ module.exports = function ({ db, config, logger }) {
       const doc = await db.get(req.params.id.toUpperCase())
       const mediaId = doc._id
 
-      try {
-        await generatePreview(db, config, logger, mediaId)
-
-        res.send(`202 PREVIEW GENERATE OK\r\n`)
-      } catch (e) {
-        logger.error(e)
-        logger.error(e.stack)
-
-        res.send(`500 PREVIEW GENERATE ERROR\r\n`)
-      }
+      await generatePreview(db, config, logger, mediaId)
+      res.send(`202 PREVIEW GENERATE OK\r\n`)
     } catch (e) {
       logger.error(e)
       logger.error(e.stack)
 
       res.send(`500 PREVIEW GENERATE ERROR\r\n`)
     }
+  }))
+
+  /**
+   * Start media scan of file
+   */
+  let ongoingMediaInfoScans = {}
+  app.post('/media/scanAsync/:fileName', wrap(async (req, res) => {
+
+    logger.info(`Looking for file "${req.params.fileName}"...`)
+    const stat = await lookForFile(req.params.fileName, config)
+
+    if (stat === false) {
+      res.send(`404 FILE NOT FOUND\r\n`)
+      return
+    }
+
+    const mediaId = req.params.fileName
+    .replace(/\.[^/.]+$/, '')
+    .replace(/\\+/g, '/')
+    .toUpperCase()
+
+    metaGenerate(res, mediaId, ongoingMediaInfoScans, 'MEDIA INFO', stat)
+  }))
+
+  /**
+   * Get status of a media scan
+   */
+  app.get('/media/scanAsync/:fileName', wrap(async (req, res) => {
+    const mediaId = req.params.fileName
+      .replace(/\.[^/.]+$/, '')
+      .replace(/\\+/g, '/')
+      .toUpperCase()
+    metaStatus(mediaId, 'MEDIA INFO', ongoingMediaInfoScans, req, res)
   }))
 
   app.get('/media/scan/:fileName', wrap(async (req, res) => {
