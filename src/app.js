@@ -152,7 +152,7 @@ module.exports = function ({ db, config, logger }) {
     }
   }))
 
-  function metaGenerate(res, idString ,dbGeneration, name, fileStat) {
+  function metaGenerate (res, idString, dbGeneration, name, fileStat) {
     res.set('content-type', 'text/plain')
     if (dbGeneration[idString] && !dbGeneration[idString].done) {
       res.send(`203 ${name} BEING PROCESSED\r\n`)
@@ -169,21 +169,21 @@ module.exports = function ({ db, config, logger }) {
         switch (name) {
           case 'THUMBNAIL GENERATE':
             return generateThumb(config, doc)
-            .then(() => {
-              return db.put(doc)
-            })
+              .then(() => {
+                return db.put(doc)
+              })
           case 'PREVIEW GENERATE':
             const mediaId = doc._id
             return generatePreview(db, config, logger, mediaId)
           case 'MEDIA INFO':
             return generateInfo(config, doc)
-            .then(() => {
-              return db.put(doc)
-            })
-            .then(() => {
-              logger.info(`Generated info for "${idString}"`)
-              dbGeneration[idString].status = 'success'
-            })
+              .then(() => {
+                return db.put(doc)
+              })
+              .then(() => {
+                logger.info(`Generated info for "${idString}"`)
+                dbGeneration[idString].status = 'success'
+              })
           default:
             return Promise.reject(new Error('Invalid Name ' + name))
         }
@@ -193,7 +193,7 @@ module.exports = function ({ db, config, logger }) {
         dbGeneration[idString].done = true
       })
       .catch(error => {
-        if(name === 'MEDIA INFO') {
+        if (name === 'MEDIA INFO') {
           dbGeneration[idString].error = error
           dbGeneration[idString].status = 'degraded'
           return scanFile(db, config, logger, fileStat.mediaPath, fileStat.mediaId, fileStat.mediaStat)
@@ -215,7 +215,7 @@ module.exports = function ({ db, config, logger }) {
     res.send(`202 ${name} QUEUED OK\r\n`)
   }
 
-  function metaStatus(id, name, dbGeneration, req, res){
+  function metaStatus (id, name, dbGeneration, req, res) {
     const preserveState = req.query.preserveState
     if (dbGeneration[id]) {
       switch (dbGeneration[id].status) {
@@ -234,11 +234,9 @@ module.exports = function ({ db, config, logger }) {
         default:
           res.send(`500 UNKNOWN STATUS: ${dbGeneration[id].status}\r\n`)
           if (dbGeneration[id].done && !preserveState) { dbGeneration[id] = undefined }
-          return
       }
     } else {
       res.send(`404 ${name} NOT FOUND\r\n`)
-      return
     }
   }
 
@@ -313,7 +311,6 @@ module.exports = function ({ db, config, logger }) {
    */
   let ongoingMediaInfoScans = {}
   app.post('/media/scanAsync/:fileName', wrap(async (req, res) => {
-
     logger.info(`Looking for file "${req.params.fileName}"...`)
     const stat = await lookForFile(req.params.fileName, config)
 
@@ -323,9 +320,9 @@ module.exports = function ({ db, config, logger }) {
     }
 
     const mediaId = req.params.fileName
-    .replace(/\.[^/.]+$/, '')
-    .replace(/\\+/g, '/')
-    .toUpperCase()
+      .replace(/\.[^/.]+$/, '')
+      .replace(/\\+/g, '/')
+      .toUpperCase()
 
     metaGenerate(res, mediaId, ongoingMediaInfoScans, 'MEDIA INFO', stat)
   }))
@@ -367,7 +364,7 @@ module.exports = function ({ db, config, logger }) {
           if (error) {
             logger.error(error.stack)
           }
-          logger.error({ name: "scanFile", err: error })
+          logger.error({ name: 'scanFile', err: error })
         })
     }
 

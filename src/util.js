@@ -56,8 +56,8 @@ module.exports = {
                 lines.forEach(function (line) {
                   if (line !== '') {
                     let lineParts = line.replace(/ +/g, ' ').split(' ')
-                    if ((lineParts && lineParts[0].startsWith('/'))
-                      || (lineParts[6] && lineParts[6] === '/')) {
+                    if ((lineParts && lineParts[0].startsWith('/')) ||
+                      (lineParts[6] && lineParts[6] === '/')) {
                       const res = {
                         fs: lineParts[0],
                         type: lineParts[1],

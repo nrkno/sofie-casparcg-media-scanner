@@ -1,6 +1,6 @@
 {
   "name": "scanner",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "",
   "license": "LGPL-3.0",
   "main": "index.js",
@@ -17,24 +17,25 @@
   },
   "author": "",
   "dependencies": {
-    "chokidar": "^2.0.4",
-    "cors": "^2.8.4",
-    "express": "^4.16.2",
+    "chokidar": "^2.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.16.4",
     "express-pouchdb": "^4.1.0",
     "mkdirp-promise": "^5.0.1",
-    "moment": "^2.20.1",
+    "moment": "^2.24.0",
     "nconf": "^0.10.0",
-    "pino": "^4.10.4",
-    "pino-http": "^3.1.0",
+    "pino": "^5.11.1",
+    "pino-http": "^4.1.0",
+    "pino-pretty": "^2.5.0",
     "pouchdb-node": "^7.0.0",
-    "recursive-readdir": "^2.2.1",
+    "recursive-readdir": "^2.2.2",
     "xml2js": "^0.4.19"
   },
   "devDependencies": {
     "jest": "^24.1.0",
     "json": "^9.0.6",
-    "nodemon": "^1.18.9",
+    "nodemon": "^1.18.10",
     "pkg": "^4.3.7",
-    "standard": "^10.0.3"
+    "standard": "^12.0.1"
   }
 }

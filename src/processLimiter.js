@@ -9,8 +9,8 @@ let ongoingProcesses = []
  * Returns at function, which when called, will let the next in line through
  * @param {string} processName Name of current process. Eg. "sceneDetection"
  */
-async function yourTurn(processName) {
-  if(!processLimiterDatabase[processName]) {
+async function yourTurn (processName) {
+  if (!processLimiterDatabase[processName]) {
     processLimiterDatabase[processName] = []
   }
   let resolveMe
@@ -18,28 +18,28 @@ async function yourTurn(processName) {
     resolveMe = resolve
     let listIsEmpty = processLimiterDatabase[processName].length === 0
     processLimiterDatabase[processName].push(resolveMe)
-    if(listIsEmpty) {
+    if (listIsEmpty) {
       resolveMe()
     }
   })
-  .then(() => {
-    return () => {
-      if(!processLimiterDatabase[processName]) {
-        processLimiterDatabase[processName] = []
-      }
-      let indexOfResolveMe = processLimiterDatabase[processName].indexOf(resolveMe)
-      if(indexOfResolveMe !== -1) {
-        processLimiterDatabase[processName].splice(indexOfResolveMe, 1);
-      }
+    .then(() => {
+      return () => {
+        if (!processLimiterDatabase[processName]) {
+          processLimiterDatabase[processName] = []
+        }
+        let indexOfResolveMe = processLimiterDatabase[processName].indexOf(resolveMe)
+        if (indexOfResolveMe !== -1) {
+          processLimiterDatabase[processName].splice(indexOfResolveMe, 1)
+        }
 
-      if(processLimiterDatabase[processName].length > 0) {
-        let nextResolve = processLimiterDatabase[processName].shift()
-        if(typeof nextResolve === 'function'){
-          nextResolve()
+        if (processLimiterDatabase[processName].length > 0) {
+          let nextResolve = processLimiterDatabase[processName].shift()
+          if (typeof nextResolve === 'function') {
+            nextResolve()
+          }
         }
       }
-    }
-  })
+    })
 }
 
 /**
@@ -48,7 +48,7 @@ async function yourTurn(processName) {
  * WARNING! This method will break the program flow. The program should be shut down after
  * running this.
  */
-function KillAllAndClearQueue() {
+function KillAllAndClearQueue () {
   processLimiterDatabase = {}
   return Promise.all(ongoingProcesses.map(ongoingProcess => {
     return crossPlatformKillProcessIfValid(ongoingProcess)
@@ -67,16 +67,16 @@ function KillAllAndClearQueue() {
  * @param {(chunk: any) => void} stderrDataCallback Callback to be run on every stderr return.
  * @param {(chunk: any) => void} stdoutDataCallback Callback to be run on every stdout return
  */
-async function ProcessLimiter(processName, command, commandArgs, stderrDataCallback, stdoutDataCallback){
+async function ProcessLimiter (processName, command, commandArgs, stderrDataCallback, stdoutDataCallback) {
   let doneProcessing = await yourTurn(processName)
   let possibleErr = null
   return new Promise((resolve, reject) => {
     let processSpawn = ChildProcess.spawn(command, commandArgs, { shell: true })
     ongoingProcesses.push(processSpawn)
-    processSpawn.stdout.on('data',stdoutDataCallback)
-    processSpawn.stderr.on('data',stderrDataCallback)
+    processSpawn.stdout.on('data', stdoutDataCallback)
+    processSpawn.stderr.on('data', stderrDataCallback)
     processSpawn.on('close', (code) => {
-      if(code === 0) {
+      if (code === 0) {
         resolve()
       } else {
         reject(new Error(`Process with pid ${processSpawn ? processSpawn.pid : 'unknown'} exited with code ${code}`))
@@ -84,15 +84,15 @@ async function ProcessLimiter(processName, command, commandArgs, stderrDataCallb
       ongoingProcesses.splice(ongoingProcesses.indexOf(processSpawn), 1)
     })
   })
-  .catch(error => {
-    possibleErr = error
-  })
-  .then(() => {
-    doneProcessing()
-    if(possibleErr) {
-      return Promise.reject(possibleErr)
-    }
-  })
+    .catch(error => {
+      possibleErr = error
+    })
+    .then(() => {
+      doneProcessing()
+      if (possibleErr) {
+        return Promise.reject(possibleErr)
+      }
+    })
 }
 
 module.exports = {

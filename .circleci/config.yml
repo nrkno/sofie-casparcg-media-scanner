@@ -35,7 +35,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: [.]
-  
+
   Tarball:
     <<: *defaults
     steps:
@@ -45,7 +45,7 @@ jobs:
           name: Tar the dist folder
           command: cd ./dist && tar czf mediascanner.tar.gz scanner leveldown.node
       - store_artifacts:
-          path: ./mediascanner.tar.gz
+          path: ./dist/mediascanner.tar.gz
 
   Build-windows:
     <<: *defaults
@@ -58,7 +58,7 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: [.]
-  
+
   Zip:
     <<: *defaults
     steps:
@@ -68,7 +68,7 @@ jobs:
           name: Zip the dist folder
           command: cd ./dist && zip mediascanner.zip scanner.exe leveldown.node
       - store_artifacts:
-          path: ./mediascanner.zip
+          path: ./dist/mediascanner.zip
 
 workflows:
   version: 2

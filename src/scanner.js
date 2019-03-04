@@ -18,7 +18,7 @@ let isCurrentlyScanning = false
 let currentScanId = 1
 
 const FILE_SCAN_RETRY_LIMIT = Number(process.env.FILE_SCAN_RETRY_LIMIT) || 3
-async function lookForFile(mediaGeneralId, config) {
+async function lookForFile (mediaGeneralId, config) {
   try {
     const mediaPath = path.join(config.paths.media, mediaGeneralId)
     const mediaStat = await statAsync(mediaPath)
@@ -33,12 +33,12 @@ async function lookForFile(mediaGeneralId, config) {
   }
 }
 
-function isCurrentlyScanningFile() {
+function isCurrentlyScanningFile () {
   return isCurrentlyScanning
 }
 
 let lastProgressReportTimestamp = new Date()
-function progressReport() {
+function progressReport () {
   if (isCurrentlyScanning) {
     return lastProgressReportTimestamp
   } else {
@@ -49,7 +49,7 @@ function progressReport() {
 /**
  * Returns current running scan id (number), or false (boolean)
  */
-function currentlyScanningFileId() {
+function currentlyScanningFileId () {
   if (isCurrentlyScanning) {
     return currentScanId
   } else {
@@ -60,7 +60,7 @@ function currentlyScanningFileId() {
 let filesToScan = {}
 let filesToScanFail = {}
 let retrying = false
-async function retryScan() {
+async function retryScan () {
   if (retrying) {
     return
   }
@@ -87,7 +87,7 @@ async function retryScan() {
   }
 }
 
-async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
+async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
   try {
     if (!mediaId || mediaStat.isDirectory()) {
       return
@@ -165,7 +165,7 @@ async function scanFile(db, config, logger, mediaPath, mediaId, mediaStat) {
 }
 
 let runningThumbnailProcess = null
-async function generateThumb(config, doc) {
+async function generateThumb (config, doc) {
   const tmpPath = path.join(os.tmpdir(), Math.random().toString(16)) + '.png'
 
   const args = [
@@ -209,7 +209,7 @@ async function generateThumb(config, doc) {
   await unlinkAsync(tmpPath)
 }
 let runningffprobeProcess = null
-async function generateInfo(config, doc) {
+async function generateInfo (config, doc) {
   const json = await new Promise((resolve, reject) => {
     const args = [
       // TODO (perf) Low priority process?
@@ -247,7 +247,7 @@ async function generateInfo(config, doc) {
   }
 }
 
-function generateCinf(config, doc, json) {
+function generateCinf (config, doc, json) {
   let tb = (json.streams[0].time_base || '1/25').split('/')
   let dur = parseFloat(json.format.duration) || (1 / 24)
 
@@ -271,7 +271,7 @@ function generateCinf(config, doc, json) {
   ].join(' ') + '\r\n'
 }
 
-function killAllChildProcesses() {
+function killAllChildProcesses () {
   return Promise.all([
     crossPlatformKillProcessIfValid(runningMediaInfoProcessSpawn),
     crossPlatformKillProcessIfValid(runningMediaInfoProcessRawVideo),
@@ -282,7 +282,7 @@ function killAllChildProcesses() {
 let runningMediaInfoProcessSpawn = null
 let runningMediaInfoProcessRawVideo = null
 let alreadyScanning = false
-function getMetadata(config, doc, json) {
+function getMetadata (config, doc, json) {
   return new Promise((resolve, reject) => {
     if (!config.metadata.scenes && !config.metadata.freezeDetection && !config.metadata.blackDetection) {
       return resolve({})
@@ -421,7 +421,7 @@ function getMetadata(config, doc, json) {
   })
 }
 
-function getFieldOrder(config, doc) {
+function getFieldOrder (config, doc) {
   return new Promise((resolve, reject) => {
     if (!config.metadata.fieldOrder) {
       return resolve('unknown')
@@ -462,10 +462,10 @@ function getFieldOrder(config, doc) {
     runningMediaInfoProcessRawVideo.on('exit', function () {
       runningMediaInfoProcessRawVideo = null
     })
-  });
+  })
 }
 
-function sortBlackFreeze(tl) {
+function sortBlackFreeze (tl) {
   return tl.sort((a, b) => {
     if (a.time > b.time) {
       return 1
@@ -484,10 +484,10 @@ function sortBlackFreeze(tl) {
     } else {
       return -1
     }
-  });
+  })
 }
 
-function updateFreezeStartEnd(tl) {
+function updateFreezeStartEnd (tl) {
   let freeze
   let interruptedFreeze = false
   let freezes = []
@@ -539,7 +539,7 @@ function updateFreezeStartEnd(tl) {
   return freezes
 }
 
-async function generateMediaInfo(config, doc, json) {
+async function generateMediaInfo (config, doc, json) {
   // TODO: We can the below
   // However; CPU usage is a concern, and I don't know how that
   // will be affected by such a parallel system.
@@ -549,7 +549,6 @@ async function generateMediaInfo(config, doc, json) {
 
   const fieldOrder = await getFieldOrder(config, doc)
   const metadata = await getMetadata(config, doc, json)
-
 
   if (config.metadata.mergeBlacksAndFreezes) {
     if (
@@ -653,24 +652,24 @@ async function generateMediaInfo(config, doc, json) {
   })
 }
 
-function fileAdded(mediaPath, mediaStat, db, config, logger) {
+function fileAdded (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
     .catch(error => { logger.error(error) })
 }
-function fileChanged(mediaPath, mediaStat, db, config, logger) {
+function fileChanged (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
     .catch(error => { logger.error(error) })
 }
-function fileUnlinked(mediaPath, mediaStat, db, config, logger) {
+function fileUnlinked (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
   return db.get(mediaId)
     .then(db.remove)
     .catch(error => { logger.error(error) })
 }
 
-async function cleanDeleted(config, db, logger) {
+async function cleanDeleted (config, db, logger) {
   logger.info('Checking for dead media')
 
   const limit = 256
@@ -712,7 +711,7 @@ async function cleanDeleted(config, db, logger) {
   logger.info(`Finished check for dead media`)
 }
 
-function scanner({ config, db, logger }) {
+function scanner ({ config, db, logger }) {
   const watcher = chokidar
     .watch(config.scanner.paths, Object.assign({
       alwaysStat: true,

@@ -1,6 +1,5 @@
 let { ProcessLimiter } = require('../src/processLimiter')
 
-
 describe('ProcessLimiter', () => {
   test('runs only one command at a time', () => {
     let firstIsFirst = false
@@ -33,7 +32,6 @@ describe('ProcessLimiter', () => {
         firstIsFirst = true
       })
       .catch(err => {
-
         fail(err)
       })
 
@@ -107,8 +105,8 @@ describe('ProcessLimiter', () => {
   })
   test('crashing command returns promise rejection', () => {
     return expect(ProcessLimiter('a', 'nonexisting', ['command'],
-    () => { },
-    () => { })
+      () => { },
+      () => { })
     ).rejects.toBeTruthy()
   })
 })

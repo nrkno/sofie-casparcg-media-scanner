@@ -15,7 +15,7 @@ const EXPECT_TIME = Number(process.env.MS_WATCHDOG_EXPECT_TIME) || 30 * 1000
 
 const WATCHDOG_FILE = 'watchdog.mov'
 
-async function cleanUpOldWatchdogFiles(logger, path) {
+async function cleanUpOldWatchdogFiles (logger, path) {
   try {
     const files = await promisify(fs.readdir, path)
 
@@ -35,7 +35,7 @@ async function cleanUpOldWatchdogFiles(logger, path) {
   }
 }
 
-async function checkScannerFunctionality(logger, db, path, fileName) {
+async function checkScannerFunctionality (logger, db, path, fileName) {
   const copyFileName = fileName.replace(/(.+)\.([^.]+)$/, `$1_watchdogIgnore_${Date.now()}.$2`)
 
   const inputPath = `${path}/${fileName}`
@@ -141,12 +141,12 @@ async function checkScannerFunctionality(logger, db, path, fileName) {
   // Looks good at this point.
 }
 
-function removeFile(path) {
+function removeFile (path) {
   // Remove file, and try again if not successful
 
   return new Promise((resolve, reject) => {
     let triesLeft = 5
-    function unlink() {
+    function unlink () {
       triesLeft--
       fs.unlink(path, (err) => {
         if (err) {
@@ -170,7 +170,7 @@ function removeFile(path) {
   })
 }
 
-function promisify(fcn) {
+function promisify (fcn) {
   let args = []
   for (let i in arguments) {
     args.push(arguments[i])
