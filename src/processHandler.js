@@ -2,15 +2,15 @@ const ChildProcess = require('child_process')
 
 function killChildProcessWin32 (childProcess) {
   return new Promise((resolve, reject) => {
-    let killTask = ChildProcess.spawn("taskkill", ["/pid", childProcess.pid, '/f', '/t'])
+    let killTask = ChildProcess.spawn('taskkill', ['/pid', childProcess.pid, '/f', '/t'])
     killTask.on('exit', () => {
       resolve()
     })
   })
 }
 
-async function crossPlatformKillProcessIfValid(childProcess) {
-  if(!childProcess || !childProcess.pid) {
+async function crossPlatformKillProcessIfValid (childProcess) {
+  if (!childProcess || !childProcess.pid) {
     return
   }
   switch (process.platform) {

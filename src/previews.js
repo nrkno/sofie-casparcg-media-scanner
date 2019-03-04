@@ -1,5 +1,4 @@
 // @ts-check
-const ChildProcess = require('child_process')
 const util = require('util')
 const mkdirp = require('mkdirp-promise')
 const fs = require('fs')
@@ -12,7 +11,7 @@ const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const renameAsync = util.promisify(fs.rename)
 
-async function deletePreview(logger, mediaId) {
+async function deletePreview (logger, mediaId) {
   const destPath = path.join('_previews', mediaId) + '.webm'
   await unlinkAsync(destPath).catch(err => {
     if (err.code !== 'ENOENT' && err.message.indexOf('no such file or directory') === -1) {
@@ -24,7 +23,7 @@ async function deletePreview(logger, mediaId) {
 
 let lastProgressReportTimestamp = new Date()
 let isCurrentlyScanning = false
-async function generatePreview(db, config, logger, mediaId) {
+async function generatePreview (db, config, logger, mediaId) {
   try {
     const destPath = path.join('_previews', mediaId) + '.webm'
     const doc = await db.get(mediaId)
@@ -87,7 +86,7 @@ async function generatePreview(db, config, logger, mediaId) {
   }
   isCurrentlyScanning = false
 }
-async function rowChanged(id, deleted, logger, db, config) {
+async function rowChanged (id, deleted, logger, db, config) {
   if (!getManualMode()) {
     if (deleted) {
       await deletePreview(logger, id)
@@ -97,7 +96,7 @@ async function rowChanged(id, deleted, logger, db, config) {
   }
 }
 
-async function previews({ config, db, logger }) {
+async function previews ({ config, db, logger }) {
   let changesListener = db.changes({
     since: 'now',
     live: true
@@ -117,7 +116,7 @@ async function previews({ config, db, logger }) {
   return changesListener
 }
 
-function progressReport() {
+function progressReport () {
   if (isCurrentlyScanning) {
     return lastProgressReportTimestamp
   } else {
