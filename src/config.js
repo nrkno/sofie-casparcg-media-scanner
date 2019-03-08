@@ -48,7 +48,10 @@ const defaults = {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'trace',
     name: pkg.name,
     version: pkg.version,
-    prettyPrint: true // process.env.NODE_ENV !== 'production'
+    prettyPrint: {
+      translateTime: 'SYS:standard',
+      colorize: true
+    } // process.env.NODE_ENV !== 'production'
   },
   http: {
     port: 8000
