@@ -50,7 +50,7 @@ const defaults = {
     version: pkg.version,
     prettyPrint: {
       translateTime: 'SYS:standard',
-      colorize: true
+      colorize: false
     } // process.env.NODE_ENV !== 'production'
   },
   http: {

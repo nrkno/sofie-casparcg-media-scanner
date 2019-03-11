@@ -35,6 +35,8 @@
                 "0.04",
                 "--caspar",
                 "null",
+                "--logger.prettyPrint.colorize",
+                "true",
             ]
         }
     ]
