@@ -5,7 +5,7 @@ const cors = require('cors')
 const PouchDB = require('pouchdb-node')
 const util = require('util')
 const path = require('path')
-const { generateInfo, generateThumb, scanFile, lookForFile } = require('./scanner')
+const { generateInfo, generateThumb, generateAdvancedMetadata, scanFile, lookForFile } = require('./scanner')
 const { generatePreview } = require('./previews')
 const recursiveReadDir = require('recursive-readdir')
 const { getId, fsSize } = require('./util')
@@ -184,6 +184,11 @@ module.exports = function ({ db, config, logger }) {
                 logger.info(`Generated info for "${idString}"`)
                 dbGeneration[idString].status = 'success'
               })
+          case 'METADATA':
+            return generateAdvancedMetadata(config, doc)
+              .then((doc) => {
+                return db.put(doc)
+              })
           default:
             return Promise.reject(new Error('Invalid Name ' + name))
         }
@@ -336,6 +341,38 @@ module.exports = function ({ db, config, logger }) {
       .replace(/\\+/g, '/')
       .toUpperCase()
     metaStatus(mediaId, 'MEDIA INFO', ongoingMediaInfoScans, req, res)
+  }))
+
+  /**
+   * Start media scan of file
+   */
+  let ongoingMediaMetadataScans = {}
+  app.post('/metadata/scanAsync/:fileName', wrap(async (req, res) => {
+    logger.info(`Looking for file "${req.params.fileName}"...`)
+    const stat = await lookForFile(req.params.fileName, config)
+
+    if (stat === false) {
+      res.send(`404 FILE NOT FOUND\r\n`)
+      return
+    }
+
+    const mediaId = req.params.fileName
+      .replace(/\.[^/.]+$/, '')
+      .replace(/\\+/g, '/')
+      .toUpperCase()
+
+    metaGenerate(res, mediaId, ongoingMediaMetadataScans, 'METADATA', stat)
+  }))
+
+  /**
+   * Get status of a media scan
+   */
+  app.get('/metadata/scanAsync/:fileName', wrap(async (req, res) => {
+    const mediaId = req.params.fileName
+      .replace(/\.[^/.]+$/, '')
+      .replace(/\\+/g, '/')
+      .toUpperCase()
+    metaStatus(mediaId, 'METADATA', ongoingMediaInfoScans, req, res)
   }))
 
   app.get('/media/scan/:fileName', wrap(async (req, res) => {

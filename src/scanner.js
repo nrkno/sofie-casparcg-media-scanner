@@ -243,7 +243,11 @@ async function generateInfo (config, doc) {
   doc.cinf = generateCinf(config, doc, json)
 
   if (config.metadata !== null) {
-    doc.mediainfo = await generateMediaInfo(config, doc, json)
+    doc.mediainfo = await generateBasicMetadata(config, doc, json)
+
+    if (!getManualMode()) {
+      doc.mediainfo = await generateAdvancedMetadata(config, doc)
+    }
   }
 }
 
@@ -282,10 +286,14 @@ function killAllChildProcesses () {
 let runningMediaInfoProcessSpawn = null
 let runningMediaInfoProcessRawVideo = null
 let alreadyScanning = false
-function getMetadata (config, doc, json) {
+function getMetadata (config, doc) {
   return new Promise((resolve, reject) => {
     if (!config.metadata.scenes && !config.metadata.freezeDetection && !config.metadata.blackDetection) {
       return resolve({})
+    }
+
+    if (!doc.mediainfo || !doc.mediainfo.format || !doc.mediainfo.format.duration) {
+      return reject(new Error('Running getMetadata requires the presence of basic file data first.'))
     }
 
     let filterString = '' // String with combined filters.
@@ -406,8 +414,8 @@ function getMetadata (config, doc, json) {
         // success
         // if freeze frame is the end of video, it is not detected fully
         if (freezes[freezes.length - 1] && !freezes[freezes.length - 1].end) {
-          freezes[freezes.length - 1].end = json.format.duration
-          freezes[freezes.length - 1].duration = json.format.duration - freezes[freezes.length - 1].start
+          freezes[freezes.length - 1].end = doc.mediainfo.format.duration
+          freezes[freezes.length - 1].duration = doc.mediainfo.format.duration - freezes[freezes.length - 1].start
         }
         resolve({ scenes, freezes, blacks })
       } else {
@@ -539,59 +547,23 @@ function updateFreezeStartEnd (tl) {
   return freezes
 }
 
-async function generateMediaInfo (config, doc, json) {
-  // TODO: We can the below
-  // However; CPU usage is a concern, and I don't know how that
-  // will be affected by such a parallel system.
-  // const [fieldOrder, metadata] = await Promise.all([
-  //   getFieldOrder(config, doc),
-  //   getMetadata(config, doc, json)])
-
-  const fieldOrder = await getFieldOrder(config, doc)
-  const metadata = await getMetadata(config, doc, json)
-
-  if (config.metadata.mergeBlacksAndFreezes) {
-    if (
-      metadata.blacks &&
-      metadata.blacks.length &&
-      metadata.freezes &&
-      metadata.freezes.length
-    ) {
-      // blacks are subsets of freezes, so we can remove the freeze frame warnings during a black
-      // in order to do this we create a linear timeline:
-      let tl = []
-      for (const black of metadata.blacks) {
-        tl.push({ time: black.start, type: 'start', isBlack: true })
-        tl.push({ time: black.end, type: 'end', isBlack: true })
-      }
-      for (const freeze of metadata.freezes) {
-        tl.push({ time: freeze.start, type: 'start', isBlack: false })
-        tl.push({ time: freeze.end, type: 'end', isBlack: false })
-      }
-      // then we sort it for time, if black & freeze start at the same time make sure black is inside the freeze
-      tl = sortBlackFreeze(tl)
-
-      // now we add freezes that aren't coinciding with blacks
-      metadata.freezes = updateFreezeStartEnd(tl)
+const tryToCast = val => isNaN(Number(val)) ? val : Number(val)
+const tryToCastDoc = doc => {
+  for (let key in doc) {
+    let type = typeof doc[key]
+    if (type === 'object') {
+      doc[key] = tryToCastDoc(doc[key])
+    } else {
+      doc[key] = tryToCast(doc[key])
     }
   }
+  return doc
+}
 
+async function generateBasicMetadata (config, doc, json) {
   let type = 'AUDIO'
   if (json.streams[0].pix_fmt) {
     type = (parseFloat(json.format.duration) || 0) <= (1 / 24) ? 'STILL' : 'MOVIE'
-  }
-
-  const tryToCast = val => isNaN(Number(val)) ? val : Number(val)
-  const tryToCastDoc = doc => {
-    for (let key in doc) {
-      let type = typeof doc[key]
-      if (type === 'object') {
-        doc[key] = tryToCastDoc(doc[key])
-      } else {
-        doc[key] = tryToCast(doc[key])
-      }
-    }
-    return doc
   }
 
   return tryToCastDoc({
@@ -600,10 +572,10 @@ async function generateMediaInfo (config, doc, json) {
     size: doc.mediaSize,
     time: doc.mediaTime,
     type,
-    field_order: fieldOrder,
-    scenes: metadata.scenes,
-    freezes: metadata.freezes,
-    blacks: metadata.blacks,
+    field_order: (doc.mediainfo || {}).fieldOrder,
+    scenes: (doc.mediainfo || {}).scenes,
+    freezes: (doc.mediainfo || {}).freezes,
+    blacks: (doc.mediainfo || {}).blacks,
 
     streams: json.streams.map(s => ({
       codec: {
@@ -652,13 +624,69 @@ async function generateMediaInfo (config, doc, json) {
   })
 }
 
+async function generateAdvancedMetadata (config, doc) {
+  // TODO: We can the below
+  // However; CPU usage is a concern, and I don't know how that
+  // will be affected by such a parallel system.
+  // const [fieldOrder, metadata] = await Promise.all([
+  //   getFieldOrder(config, doc),
+  //   getMetadata(config, doc, json)])
+
+  const fieldOrder = await getFieldOrder(config, doc)
+  const metadata = await getMetadata(config, doc)
+
+  if (config.metadata.mergeBlacksAndFreezes) {
+    if (
+      metadata.blacks &&
+      metadata.blacks.length &&
+      metadata.freezes &&
+      metadata.freezes.length
+    ) {
+      // blacks are subsets of freezes, so we can remove the freeze frame warnings during a black
+      // in order to do this we create a linear timeline:
+      let tl = []
+      for (const black of metadata.blacks) {
+        tl.push({ time: black.start, type: 'start', isBlack: true })
+        tl.push({ time: black.end, type: 'end', isBlack: true })
+      }
+      for (const freeze of metadata.freezes) {
+        tl.push({ time: freeze.start, type: 'start', isBlack: false })
+        tl.push({ time: freeze.end, type: 'end', isBlack: false })
+      }
+      // then we sort it for time, if black & freeze start at the same time make sure black is inside the freeze
+      tl = sortBlackFreeze(tl)
+
+      // now we add freezes that aren't coinciding with blacks
+      metadata.freezes = updateFreezeStartEnd(tl)
+    }
+  }
+
+  return tryToCastDoc({
+    name: doc._id,
+    path: doc.mediaPath,
+    size: doc.mediaSize,
+    time: doc.mediaTime,
+
+    type: (doc.mediainfo || {}).type,
+    field_order: fieldOrder,
+    scenes: metadata.scenes,
+    freezes: metadata.freezes,
+    blacks: metadata.blacks,
+
+    streams: (doc.mediainfo || {}).streams,
+    format: (doc.mediainfo || {}).format
+  })
+}
+
 function fileAdded (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
+  if (getManualMode()) return Promise.resolve()
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
     .catch(error => { logger.error(error) })
 }
 function fileChanged (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
+  if (getManualMode()) return Promise.resolve()
   return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
     .catch(error => { logger.error(error) })
 }
@@ -745,7 +773,8 @@ function scanner ({ config, db, logger }) {
 
 module.exports = {
   generateThumb,
-  generateInfo,
+  generateInfo: generateInfo,
+  generateAdvancedInfo: generateAdvancedMetadata,
   scanFile,
   lookForFile,
   isCurrentlyScanningFile,
