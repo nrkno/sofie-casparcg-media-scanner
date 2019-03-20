@@ -5,7 +5,7 @@ const cors = require('cors')
 const PouchDB = require('pouchdb-node')
 const util = require('util')
 const path = require('path')
-const { generateInfo, generateThumb, generateAdvancedMetadata, scanFile, lookForFile } = require('./scanner')
+const { generateInfo, generateThumb, generateAdvancedInfo, scanFile, lookForFile } = require('./scanner')
 const { generatePreview } = require('./previews')
 const recursiveReadDir = require('recursive-readdir')
 const { getId, fsSize } = require('./util')
@@ -185,8 +185,10 @@ module.exports = function ({ db, config, logger }) {
                 dbGeneration[idString].status = 'success'
               })
           case 'METADATA':
-            return generateAdvancedMetadata(config, doc)
-              .then((doc) => {
+            return generateAdvancedInfo(config, doc)
+              .then((mediainfo) => {
+                doc.mediainfo = mediainfo
+                console.log(JSON.stringify(doc))
                 return db.put(doc)
               })
           default:
@@ -372,7 +374,7 @@ module.exports = function ({ db, config, logger }) {
       .replace(/\.[^/.]+$/, '')
       .replace(/\\+/g, '/')
       .toUpperCase()
-    metaStatus(mediaId, 'METADATA', ongoingMediaInfoScans, req, res)
+    metaStatus(mediaId, 'METADATA', ongoingMediaMetadataScans, req, res)
   }))
 
   app.get('/media/scan/:fileName', wrap(async (req, res) => {
