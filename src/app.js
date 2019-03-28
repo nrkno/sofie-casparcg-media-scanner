@@ -167,14 +167,6 @@ module.exports = function ({ db, config, logger }) {
     db.get(idString)
       .then(doc => {
         switch (name) {
-          case 'THUMBNAIL GENERATE':
-            return generateThumb(config, doc)
-              .then(() => {
-                return db.put(doc)
-              })
-          case 'PREVIEW GENERATE':
-            const mediaId = doc._id
-            return generatePreview(db, config, logger, mediaId)
           case 'MEDIA INFO':
             return generateInfo(config, doc)
               .then(() => {
@@ -191,6 +183,14 @@ module.exports = function ({ db, config, logger }) {
                 console.log(JSON.stringify(doc))
                 return db.put(doc)
               })
+          case 'THUMBNAIL GENERATE':
+            return generateThumb(config, doc)
+              .then(() => {
+                return db.put(doc)
+              })
+          case 'PREVIEW GENERATE':
+            const mediaId = doc._id
+            return generatePreview(db, config, logger, mediaId)
           default:
             return Promise.reject(new Error('Invalid Name ' + name))
         }
@@ -203,7 +203,7 @@ module.exports = function ({ db, config, logger }) {
         if (name === 'MEDIA INFO') {
           dbGeneration[idString].error = error
           dbGeneration[idString].status = 'degraded'
-          return scanFile(db, config, logger, fileStat.mediaPath, fileStat.mediaId, fileStat.mediaStat)
+          return scanFile(db, config, logger, fileStat.mediaPath, fileStat.mediaId, fileStat.mediaStat, true)
             .then((data) => {
               dbGeneration[idString].status = 'success'
               return data

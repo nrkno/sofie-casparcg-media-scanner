@@ -73,7 +73,8 @@ async function retryScan () {
       fileObject.logger,
       fileObject.mediaPath,
       fileObject.mediaId,
-      fileObject.mediaStat)
+      fileObject.mediaStat,
+      fileObject.generateInfo)
       .then(() => {
         delete filesToScan[fileObject.mediaId]
       })
@@ -87,14 +88,14 @@ async function retryScan () {
   }
 }
 
-async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
+async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat, generateInfoWhenFound) {
   try {
     if (!mediaId || mediaStat.isDirectory()) {
       return
     }
     if (!filesToScan[mediaId]) {
       filesToScan[mediaId] = {
-        db, config, logger, mediaPath, mediaId, mediaStat
+        db, config, logger, mediaPath, mediaId, mediaStat, generateInfoWhenFound
       }
     }
     if (isCurrentlyScanning) {
@@ -143,6 +144,10 @@ async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat) {
           mediaLogger.error({ err }, 'Thumbnail Failed')
         })
       ])
+    } else if (getManualMode() && generateInfoWhenFound) {
+      await generateInfo(config, doc).catch(err => {
+        mediaLogger.error({ err }, 'Info Failed')
+      })
     }
 
     await db.put(doc)
