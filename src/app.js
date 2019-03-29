@@ -5,6 +5,7 @@ const cors = require('cors')
 const PouchDB = require('pouchdb-node')
 const util = require('util')
 const path = require('path')
+const _ = require('lodash')
 const { generateInfo, generateThumb, generateAdvancedInfo, scanFile, lookForFile } = require('./scanner')
 const { generatePreview } = require('./previews')
 const recursiveReadDir = require('recursive-readdir')
@@ -169,7 +170,10 @@ module.exports = function ({ db, config, logger }) {
         switch (name) {
           case 'MEDIA INFO':
             return generateInfo(config, doc)
-              .then(() => {
+              .then((mod) => {
+                return Promise.all([db.get(doc._id), mod])
+              }).then((arg) => {
+                const doc = _.merge(arg[0], arg[1])
                 return db.put(doc)
               })
               .then(() => {
@@ -179,13 +183,19 @@ module.exports = function ({ db, config, logger }) {
           case 'METADATA':
             return generateAdvancedInfo(config, doc)
               .then((mediainfo) => {
-                doc.mediainfo = mediainfo
-                console.log(JSON.stringify(doc))
+                return Promise.all([db.get(doc._id), mediainfo])
+              }).then((arg) => {
+                const doc = arg[0]
+                doc.mediainfo = _.merge(doc.mediainfo, arg[1])
                 return db.put(doc)
               })
           case 'THUMBNAIL GENERATE':
             return generateThumb(config, doc)
-              .then(() => {
+              .then((mod) => {
+                return Promise.all([db.get(doc._id), mod])
+              })
+              .then((arg) => {
+                const doc = _.merge(arg[0], arg[1])
                 return db.put(doc)
               })
           case 'PREVIEW GENERATE':
@@ -349,31 +359,16 @@ module.exports = function ({ db, config, logger }) {
    * Start media scan of file
    */
   let ongoingMediaMetadataScans = {}
-  app.post('/metadata/scanAsync/:fileName', wrap(async (req, res) => {
-    logger.info(`Looking for file "${req.params.fileName}"...`)
-    const stat = await lookForFile(req.params.fileName, config)
-
-    if (stat === false) {
-      res.send(`404 FILE NOT FOUND\r\n`)
-      return
-    }
-
-    const mediaId = req.params.fileName
-      .replace(/\.[^/.]+$/, '')
-      .replace(/\\+/g, '/')
-      .toUpperCase()
-
-    metaGenerate(res, mediaId, ongoingMediaMetadataScans, 'METADATA', stat)
+  app.post('/metadata/generateAsync/:id', wrap(async (req, res) => {
+    let mediaId = req.params.id.toUpperCase()
+    metaGenerate(res, mediaId, ongoingMediaMetadataScans, 'METADATA')
   }))
 
   /**
    * Get status of a media scan
    */
-  app.get('/metadata/scanAsync/:fileName', wrap(async (req, res) => {
-    const mediaId = req.params.fileName
-      .replace(/\.[^/.]+$/, '')
-      .replace(/\\+/g, '/')
-      .toUpperCase()
+  app.get('/metadata/generateAsync/:id', wrap(async (req, res) => {
+    let mediaId = req.params.id.toUpperCase()
     metaStatus(mediaId, 'METADATA', ongoingMediaMetadataScans, req, res)
   }))
 

@@ -3,6 +3,7 @@ const util = require('util')
 const mkdirp = require('mkdirp-promise')
 const fs = require('fs')
 const path = require('path')
+const _ = require('lodash')
 const { fileExists } = require('./util')
 const { getManualMode } = require('./manual')
 const { ProcessLimiter } = require('./processLimiter')
@@ -71,15 +72,21 @@ async function generatePreview (db, config, logger, mediaId) {
       })
 
     const previewStat = await statAsync(tmpPath)
-    doc.previewSize = previewStat.size
-    doc.previewTime = doc.mediaTime
-    doc.previewPath = destPath
+    const modifier = {}
+    modifier.previewSize = previewStat.size
+    modifier.previewTime = doc.mediaTime
+    modifier.previewPath = destPath
 
     await renameAsync(tmpPath, destPath)
 
-    await db.put(doc)
+    let updateDoc = await db.get(mediaId)
+    updateDoc = _.merge(updateDoc, modifier)
+
+    db.put(updateDoc)
 
     mediaLogger.info('Finished preview generation')
+
+    return modifier
   } catch (err) {
     logger.error({ name: 'generatePreview', err })
     logger.error(err.stack)

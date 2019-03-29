@@ -10,6 +10,7 @@ const { getId, fileExists } = require('./util')
 const moment = require('moment')
 const { getManualMode } = require('./manual')
 const { crossPlatformKillProcessIfValid } = require('./processHandler')
+const _ = require('lodash')
 const statAsync = util.promisify(fs.stat)
 const unlinkAsync = util.promisify(fs.unlink)
 const readFileAsync = util.promisify(fs.readFile)
@@ -93,12 +94,10 @@ async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat, gene
     if (!mediaId || mediaStat.isDirectory()) {
       return
     }
-    if (!filesToScan[mediaId]) {
-      filesToScan[mediaId] = {
-        db, config, logger, mediaPath, mediaId, mediaStat, generateInfoWhenFound
-      }
+    filesToScan[mediaId] = {
+      db, config, logger, mediaPath, mediaId, mediaStat, generateInfoWhenFound
     }
-    if (isCurrentlyScanning) {
+    if (!getManualMode() && isCurrentlyScanning) { // if MS is in manualMode, then 
       return
     }
     isCurrentlyScanning = true
@@ -144,7 +143,7 @@ async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat, gene
           mediaLogger.error({ err }, 'Thumbnail Failed')
         })
       ])
-    } else if (getManualMode() && generateInfoWhenFound) {
+    } else if (getManualMode() && generateInfoWhenFound) { // Check if basic file probe should be run in manualMode
       await generateInfo(config, doc).catch(err => {
         mediaLogger.error({ err }, 'Info Failed')
       })
@@ -195,23 +194,27 @@ async function generateThumb (config, doc) {
     })
   })
 
+  const modifier = {}
+
   const thumbStat = await statAsync(tmpPath)
-  doc.thumbSize = thumbStat.size
-  doc.thumbTime = thumbStat.mtime.getTime()
-  doc.tinf = [
+  modifier.thumbSize = thumbStat.size
+  modifier.thumbTime = thumbStat.mtime.getTime()
+  modifier.tinf = [
     `"${getId(config.paths.media, doc.mediaPath)}"`,
     moment(doc.thumbTime).format('YYYYMMDDTHHmmss'),
     // TODO (fix) Binary or base64 size?
     doc.thumbSize
   ].join(' ') + '\r\n'
 
-  doc._attachments = {
+  modifier._attachments = {
     'thumb.png': {
       content_type: 'image/png',
       data: (await readFileAsync(tmpPath))
     }
   }
   await unlinkAsync(tmpPath)
+  _.merge(doc, modifier)
+  return modifier
 }
 let runningffprobeProcess = null
 async function generateInfo (config, doc) {
@@ -245,15 +248,20 @@ async function generateInfo (config, doc) {
     })
   })
 
-  doc.cinf = generateCinf(config, doc, json)
+  const modifier = {}
+
+  modifier.cinf = generateCinf(config, doc, json)
 
   if (config.metadata !== null) {
-    doc.mediainfo = await generateBasicMetadata(config, doc, json)
+    modifier.mediainfo = await generateBasicMetadata(config, doc, json)
 
     if (!getManualMode()) {
-      doc.mediainfo = await generateAdvancedMetadata(config, doc)
+      _.merge(modifier.mediainfo, await generateAdvancedMetadata(config, doc))
     }
   }
+
+  _.merge(doc, modifier)
+  return modifier
 }
 
 function generateCinf (config, doc, json) {
@@ -672,27 +680,21 @@ async function generateAdvancedMetadata (config, doc) {
     size: doc.mediaSize,
     time: doc.mediaTime,
 
-    type: (doc.mediainfo || {}).type,
     field_order: fieldOrder,
     scenes: metadata.scenes,
     freezes: metadata.freezes,
-    blacks: metadata.blacks,
-
-    streams: (doc.mediainfo || {}).streams,
-    format: (doc.mediainfo || {}).format
+    blacks: metadata.blacks
   })
 }
 
 function fileAdded (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
-  if (getManualMode()) return Promise.resolve()
-  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat, false)
     .catch(error => { logger.error(error) })
 }
 function fileChanged (mediaPath, mediaStat, db, config, logger) {
   const mediaId = getId(config.paths.media, mediaPath)
-  if (getManualMode()) return Promise.resolve()
-  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat)
+  return scanFile(db, config, logger, mediaPath, mediaId, mediaStat, false)
     .catch(error => { logger.error(error) })
 }
 function fileUnlinked (mediaPath, mediaStat, db, config, logger) {
