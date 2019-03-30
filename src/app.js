@@ -29,7 +29,12 @@ module.exports = function ({ db, config, logger }) {
   }))
 
   app.get('/stat/fs', wrap(async (req, res) => {
-    const filesystemInfo = await fsSize()
+    let filesystemInfo = await fsSize()
+
+    if (config.fileSystem.monitorDrives !== '*') {
+      const fsList = config.fileSystem.monitorDrives.split(',')
+      filesystemInfo = filesystemInfo.filter((i) => (fsList.indexOf(i.fs) >= 0))
+    }
 
     res.set('content-type', 'application/json')
     res.send(filesystemInfo)

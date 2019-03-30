@@ -55,6 +55,9 @@ const defaults = {
   },
   http: {
     port: 8000
+  },
+  fileSystem: {
+    monitorDrives: '*'
   }
 }
 
