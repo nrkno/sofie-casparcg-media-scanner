@@ -259,6 +259,7 @@ async function generateInfo (config, doc) {
 
   if (config.metadata !== null) {
     modifier.mediainfo = await generateBasicMetadata(config, doc, json)
+    doc.mediainfo = modifier.mediainfo
 
     if (!getManualMode()) {
       _.merge(modifier.mediainfo, await generateAdvancedMetadata(config, doc))
