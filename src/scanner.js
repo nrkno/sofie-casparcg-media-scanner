@@ -123,7 +123,12 @@ async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat, gene
       return
     }
 
-    if (doc.mediaSize === mediaStat.size && doc.mediaTime === mediaStat.mtime.getTime()) {
+    if (doc.mediaSize === mediaStat.size &&
+        doc.mediaTime === mediaStat.mtime.getTime() &&
+        (!getManualMode() ?
+          doc.mediainfo && doc.thumbSize
+        : true)
+    ) {
       isCurrentlyScanning = false
       delete filesToScanFail[mediaId]
       delete filesToScan[mediaId]
