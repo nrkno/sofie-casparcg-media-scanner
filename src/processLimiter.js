@@ -79,7 +79,7 @@ async function ProcessLimiter (processName, command, commandArgs, stderrDataCall
       if (code === 0) {
         resolve()
       } else {
-        reject(new Error(`Process with pid ${processSpawn ? processSpawn.pid : 'unknown'} exited with code ${code}`))
+        reject(new Error(`Process with pid ${processSpawn ? processSpawn.pid : 'unknown'} exited with code ${code}. Command was: "${command}" "${commandArgs.join(' ')}"`))
       }
       ongoingProcesses.splice(ongoingProcesses.indexOf(processSpawn), 1)
     })
