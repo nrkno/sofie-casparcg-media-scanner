@@ -94,12 +94,10 @@ async function generatePreview (db, config, logger, mediaId) {
   isCurrentlyScanning = false
 }
 async function rowChanged (id, deleted, logger, db, config) {
-  if (!getManualMode()) {
-    if (deleted) {
-      await deletePreview(logger, id)
-    } else {
-      await generatePreview(db, config, logger, id)
-    }
+  if (deleted) {
+    await deletePreview(logger, id)
+  } else {
+    if (!getManualMode()) await generatePreview(db, config, logger, id)
   }
 }
 
