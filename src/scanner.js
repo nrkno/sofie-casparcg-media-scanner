@@ -256,6 +256,7 @@ async function generateInfo (config, doc) {
   const modifier = {}
 
   modifier.cinf = generateCinf(config, doc, json)
+  doc.cinf = modifier.cinf
 
   if (config.metadata !== null) {
     modifier.mediainfo = await generateBasicMetadata(config, doc, json)
