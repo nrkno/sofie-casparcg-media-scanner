@@ -43,6 +43,12 @@ const defaults = {
     height: -1,
     bitrate: '40k'
   },
+  waveforms: {
+    enable: false,
+    pixelsPerSecond: 5,
+    height: 120,
+    colors: 'green'
+  },
   isProduction: process.env.NODE_ENV === 'production',
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'trace',

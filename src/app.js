@@ -81,6 +81,12 @@ module.exports = function ({ db, config, logger }) {
     res.sendFile(path.join(process.cwd(), previewPath))
   }))
 
+  app.get('/media/waveform/:id', wrap(async (req, res) => {
+    const { waveformPath } = await db.get(req.params.id.toUpperCase())
+
+    res.sendFile(path.join(process.cwd(), waveformPath))
+  }))
+
   app.get('/cls', wrap(async (req, res) => {
     const { rows } = await db.allDocs({ include_docs: true })
 

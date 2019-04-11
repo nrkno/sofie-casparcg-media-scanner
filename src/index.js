@@ -4,6 +4,7 @@ const config = require('./config')
 const PouchDB = require('pouchdb-node')
 const { scanner } = require('./scanner')
 const { previews } = require('./previews')
+const { waveforms } = require('./waveforms')
 const app = require('./app')
 const WatchDog = require('./watchdog')
 
@@ -25,6 +26,9 @@ app({ logger, db, config }).listen(config.http.port)
 if (config.previews.enable) {
   let previewListener = previews({ logger, db, config })
   // previewListener.cancel() to stop
+}
+if (config.waveforms.enable) {
+  waveforms({ logger, db, config })
 }
 logger.info('STARTING watchdog')
 WatchDog.startWatchDog(logger, db)
