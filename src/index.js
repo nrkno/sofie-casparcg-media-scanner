@@ -7,6 +7,8 @@ const { previews } = require('./previews')
 const app = require('./app')
 const WatchDog = require('./watchdog')
 
+console.log('process started') // This is a message all Sofie processes log upon startup
+
 const logger = pino(Object.assign({}, config.logger, {
   serializers: {
     err: pino.stdSerializers.err
