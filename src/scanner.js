@@ -344,7 +344,7 @@ function getMetadata (config, doc) {
     // in partial result, and not just "all or nothing".
     const args = [
       '-hide_banner',
-      '-i', `${doc.mediaPath}`,
+      '-i', `"${doc.mediaPath}"`,
       '-filter:v', filterString,
       '-an',
       '-f', 'null',
