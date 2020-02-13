@@ -63,7 +63,7 @@ module.exports = {
                         type: lineParts[1],
                         size: parseInt(lineParts[2]) * 1024,
                         used: parseInt(lineParts[3]) * 1024,
-                        use: (100 * parseFloat(lineParts[3]) / parseFloat(lineParts[2])).toFixed(2),
+                        use: -1,
                         mount: lineParts[lineParts.length - 1]
                       }
                       if (process.platform === 'darwin') {
@@ -71,15 +71,7 @@ module.exports = {
                         res.size = parseInt(lineParts[1]) * 1024
                         res.used = parseInt(lineParts[2]) * 1024
                       }
-                      res.use = (100 * res.size / res.used).toFixed(2)
-                      // data.push({
-                      //   'fs': line[0],
-                      //   'type': process.platform === 'darwin' ? 'HFS' : line[1],
-                      //   'size': parseInt(process.platform === 'darwin' ?  line[1] : line[2]) * 1024,
-                      //   'used': parseInt(process.platform === 'darwin' ? line[2] : line[3]) * 1024,
-                      //   'use': parseFloat((100.0 * (process.platform === 'darwin' ? line[2] : line[3]) / (process.platform === 'darwin' ? line[1] : line[2])).toFixed(2)),
-                      //   'mount': line[line.length - 1]
-                      // })
+                      res.use = parseFloat((100.0 * res.used / res.size).toFixed(2))
                       data.push(res)
                     }
                   }
