@@ -39,5 +39,8 @@
     "nodemon": "^1.18.10",
     "standard": "^12.0.1",
     "trash-cli": "^3.0.0"
+  },
+  "resolutions": {
+    "minimist": "^1.2.3"
   }
 }
