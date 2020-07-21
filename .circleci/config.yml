@@ -1,12 +1,59 @@
-defaults: &defaults
-  docker:
-    - image: circleci/node:8
-  working_directory: ~/project
-
 version: 2
 jobs:
-  Checkout Code:
-    <<: *defaults
+  test:
+    docker:
+      - image: circleci/node:12
+    working_directory: ~/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
+            - yarn-cache-{{ .Branch }}
+            - yarn-cache-
+
+      - run: yarn install
+
+      - save_cache:
+          key: yarn-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
+          paths: [node_modules]
+
+      - run: yarn test
+      - run: yarn send-coverage
+
+      - persist_to_workspace:
+          root: .
+          paths: [.]
+      - store_artifacts:
+          path: ./coverage/clover.xml
+          prefix: tests
+      - store_artifacts:
+          path: coverage
+          prefix: coverage
+      - store_test_results:
+          path: ./coverage/clover.xml
+
+  validate-dependencies:
+    docker:
+      - image: circleci/node:12
+    working_directory: ~/project
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - yarn-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
+            - yarn-cache-{{ .Branch }}
+            - yarn-cache-
+            
+      - run: yarn install
+      - run: yarn validate:dependencies
+
+  build-windows:
+    docker:
+      - image: circleci/node:12
+    working_directory: ~/project
     steps:
       - checkout
       - attach_workspace:
@@ -17,81 +64,49 @@ jobs:
             - yarn-cache-{{ .Branch }}
             - yarn-cache-
       - run: yarn install
+      - run: yarn build-win32
+      - run:
+          name: Zip the dist folder
+          command: mv deploy media-scanner && zip -r media-scanner.zip media-scanner
+      - store_artifacts:
+          path: ./media-scanner.zip
+
+  build-linux:
+    docker:
+      - image: circleci/node:12
+    working_directory: ~/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - restore_cache:
+          keys:
+            - yarn-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
+            - yarn-cache-{{ .Branch }}
+            - yarn-cache-
+
+      - run: yarn install
+      
       - save_cache:
           key: yarn-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
           paths: [node_modules]
-      - persist_to_workspace:
-          root: .
-          paths: [.]
 
-  Build-linux:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Install and build
-          command: yarn install && yarn build-linux
-      - persist_to_workspace:
-          root: .
-          paths: [.]
-
-  Tarball:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: ~/project
+      - run: yarn build-linux
       - run:
           name: Tar the dist folder
-          command: cd ./dist && tar czf mediascanner.tar.gz scanner leveldown.node
+          command: mv deploy media-scanner && tar czf media-scanner.tar.gz media-scanner
       - store_artifacts:
-          path: ./dist/mediascanner.tar.gz
-
-  Build-windows:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Install and build
-          command: yarn install && yarn build-win32-on-linux
-      - persist_to_workspace:
-          root: .
-          paths: [.]
-
-  Zip:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: Zip the dist folder
-          command: cd ./dist && zip mediascanner.zip scanner.exe leveldown.node
-      - store_artifacts:
-          path: ./dist/mediascanner.zip
+          path: ./media-scanner.tar.gz
 
 workflows:
   version: 2
-  Test build and deploy(master only):
+  build-test-publish:
     jobs:
-      - Checkout Code
-      - Build-linux:
-          requires:
-            - Checkout Code
+      - validate-dependencies:
           filters:
             branches:
               only:
                 - master
-      - Tarball:
-          requires:
-            - Build-linux
-      - Build-windows:
-          requires:
-            - Checkout Code
-          filters:
-            branches:
-              only:
-                - master
-      - Zip:
-          requires:
-            - Build-windows
+                - develop
+      - build-windows
+      - build-linux
