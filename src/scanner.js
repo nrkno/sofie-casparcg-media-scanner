@@ -2,7 +2,7 @@
 const ChildProcess = require('child_process')
 const util = require('util')
 const chokidar = require('chokidar')
-const mkdirp = require('mkdirp-promise')
+const mkdirp = require('mkdirp')
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
@@ -97,7 +97,7 @@ async function scanFile (db, config, logger, mediaPath, mediaId, mediaStat, gene
     filesToScan[mediaId] = {
       db, config, logger, mediaPath, mediaId, mediaStat, generateInfoWhenFound
     }
-    if (!getManualMode() && isCurrentlyScanning) { // if MS is in manualMode, then 
+    if (!getManualMode() && isCurrentlyScanning) { // if MS is in manualMode, then
       return
     }
     isCurrentlyScanning = true
