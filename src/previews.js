@@ -1,6 +1,6 @@
 // @ts-check
 const util = require('util')
-const mkdirp = require('mkdirp-promise')
+const mkdirp = require('mkdirp')
 const fs = require('fs')
 const path = require('path')
 const _ = require('lodash')
