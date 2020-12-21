@@ -8,8 +8,8 @@
     "dev": "nodemon ./src",
     "lint": "standard",
     "test": "jest",
-    "build-linux": "trash deploy && mkdir deploy && nexe src.index.js -o deploy/scanner -t linux-x64 && node copy-natives.js linux-x64",
-    "build-win32": "trash deploy && mkdir deploy && nexe src.index.js -o deploy/scanner.exe -t windows-x64 && node copy-natives.js win32-x64",
+    "build-linux": "trash deploy && mkdir deploy && nexe src.index.js -o deploy/scanner -t linux-x64-12.16.2 && node copy-natives.js linux-x64",
+    "build-win32": "trash deploy && mkdir deploy && nexe src.index.js -o deploy/scanner.exe -t windows-x64-12.18.2 && node copy-natives.js win32-x64",
     "validate:dependencies": "yarn audit && yarn license-validate",
     "license-validate": "node-license-validator -p -d --allow-licenses LGPL-3.0 MIT BSD BSD-3-Clause ISC Apache Apache-2.0 \"Apache 2.0\" WTFPL Unlicense --allow-packages cycle base62"
   },
