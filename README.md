@@ -69,28 +69,26 @@ They can be accessed via the following url format `/media/preview/<name>`
 Development
 -----------
 
-This project uses the latest LTS version NodeJS (8), so you need that installed. Get it from: https://nodejs.org/en/. 
+This project uses the LTS version NodeJS (12), so you need that installed. Get it from: https://nodejs.org/en/. 
 We also use Leveldown which uses native modules so if you're on Windows you need to install windows build tools:
 
 `npm install --global --production windows-build-tools`
 
 After this:
 * Clone the repository
-* Run `npm install`
-* Run `npm dev` to start the development server
+* Run `yarn install`
+* Run `yarn dev` to start the development server
 
 Building
 -----------
 Be aware that because of the native extensions, you can only build for the target you are currently on.
 
 * On Windows
-  * `npm run build-win32`
+  * `yarn build-win32`
 * On Linux
-  * `npm run build-linux`
+  * `yarn build-linux`
   
-The built files will be placed in `./dist`, make sure you copy all files into the main CasparCG directory.
-
-Note: Due to an incompatability with a dependency and pkg, a fix up step is performed during build until this is resolved upstream. This could cause issues when updating the express-pouchdb package.
+The built files will be placed in `./deploy`, make sure you copy all files into the main CasparCG directory.
 
 License
 -------
